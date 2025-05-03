@@ -2,18 +2,12 @@
 
 A web application designed to allow users to choose algorithms in quant finance areas for simualtion and training. 
 
-
-## Tech Stack
-
-*   **Backend:** Python, FastAPI, Pydantic
-*   **Frontend:** Gradio
-*   **Package Management:** `uv`
-
 ## Setup and Running
 
 ### Prerequisites
 
-- Python 3.10+
+- **Backend:** Python 3.10+, FastAPI, Pydantic
+- **Frontend:** Gradio
 - [uv](https://github.com/astral-sh/uv) - A fast Python package installer and resolver
 
 ### Method 1:
