@@ -18,13 +18,12 @@ dependencies = [
     "python-dotenv>=0.20.0",
     "async-lru>=2.0.4",
     "gradio>=3.40.0",
-    "arxiv>=2.2.0",
-    "PyPDF2>=3.0.0",
-    "pdfminer.six>=20221105",
     "python-multipart>=0.0.5", # For file uploads
     "aiohttp>=3.11.16",
     "pip>=25.0.1",
-    "yfinance>=0.2.36"        # This is not in oriignal file, need to add it
+    # The following are not in original file, need to add it
+    "yfinance>=0.2.36",
+    "scipy>=1.12.0"
 ]
 
 [project.optional-dependencies]
