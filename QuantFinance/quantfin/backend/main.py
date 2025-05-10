@@ -32,7 +32,9 @@ class SimulationRequest(BaseModel):
 class BacktestRequest(BaseModel):
     model_name: str
     parameters: Dict[str, Any]
-    historical_data: Dict[str, Any]  # Simplified for example
+    symbol: str
+    start_date: str
+    end_date: str
 
 class HealthCheckResponse(BaseModel):
     status: str = "OK"
@@ -94,13 +96,13 @@ async def run_backtest(request: BacktestRequest) -> Dict[str, Any]:
     try:
         if request.model_name == "Algorithmic Trading Model":
             model = trading_model.TradingModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_trading_backtest(model, request.historical_data)
+            results = backtesting_service.run_trading_backtest(model, request.symbol, request.start_date, request.end_date)
         elif request.model_name == "Portfolio Management Model":
             model = portfolio_model.PortfolioModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_portfolio_backtest(model, request.historical_data)
+            results = backtesting_service.run_portfolio_backtest(model, request.symbol, request.start_date, request.end_date)
         elif request.model_name == "Risk Management Model":
             model = risk_model.RiskModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_risk_backtest(model, request.historical_data)
+            results = backtesting_service.run_risk_backtest(model, request.symbol, request.start_date, request.end_date)
         else:
             raise HTTPException(status_code=400, detail="Model not found")
         return results

@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from typing import Dict, Any, Optional
 import logging
-from quantfin.backend.utils.data_loader import load_historical_data  # Import the data loader
+#from quantfin.backend.utils.data_loader import load_historical_data  # Import the data loader
 
 
 # Configure logging
@@ -58,33 +58,30 @@ def run_simulation(model_name: str, parameters: Dict[str, Any]) -> Dict[str, Any
         logger.error(f"An unexpected error occurred: {e}")
         return {"error": f"An unexpected error occurred: {e}"}
 
-def run_backtest(model_name: str, parameters: Dict[str, Any], historical_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+def run_backtest(model_name: str, parameters: Dict[str, Any], symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
     """
-    Runs a backtest using the specified model, parameters, and historical data via the backend.
+    Sends a backtest request to the backend with the specified parameters.
 
     Args:
         model_name (str): The name of the model to backtest.
         parameters (Dict[str, Any]): The parameters for the backtest.
-        historical_data (Dict[str, pd.DataFrame]): The historical data for the backtest.
+        symbol (str): The stock symbol.
+        start_date (str): The start date for historical data.
+        end_date (str): The end date for historical data.
 
     Returns:
         Dict[str, Any]: The results of the backtest from the backend.
     """
-    try:
-        logger.info(f"Sending backtest request to backend for model: {model_name} with parameters: {parameters} and data keys: {list(historical_data.keys())}")
 
-        #  Convert pandas DataFrames to a serializable format (e.g., dictionary)
-        serializable_data = {}
-        for key, df in historical_data.items():
-            if isinstance(df, pd.DataFrame):
-                serializable_data[key] = df.to_dict(orient="records")
-            else:
-                serializable_data[key] = df #hope it is already serializable
+    try:
+        logger.info(f"Sending backtest request to backend for model: {model_name} with parameters: {parameters} and symbol: {symbol}, start_date: {start_date}, end_date: {end_date}")
 
         response = requests.post(f"{BACKEND_URL}/backtest", json={
             "model_name": model_name,
             "parameters": parameters,
-            "historical_data": serializable_data  # Send the serializable data
+            "symbol": symbol,
+            "start_date": start_date,
+            "end_date": end_date
         })
         response.raise_for_status()
         return response.json()
@@ -122,7 +119,8 @@ def create_gradio_interface():
     # Define function to handle button click
     def run_model(model_name: str, initial_capital: float, strategy: str, sma_window: int, risk_tolerance: str,
                   asset_classes: list, risk_metric: str, confidence_level: float, holding_period: int,
-                  symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+                  symbol: str, start_date: str, end_date: str) -> Dict[str, Any]: 
+   
         """
         Handles the execution of simulations and backtests based on user inputs.
 
@@ -155,15 +153,8 @@ def create_gradio_interface():
             "holding_period": holding_period,
         }
 
-        if symbol: # only load data if a symbol is provided
-            historical_data = load_historical_data(symbol, start_date, end_date)
-            if not historical_data:
-                return {"error": "Failed to load historical data.  Please check the symbol and date range."}
-            #  Check if data loading was successful
-            if historical_data and list(historical_data.values())[0].empty:
-                return {"error": "No data returned for the given symbol and date range."}
-            # Run backtest if historical data is available
-            return run_backtest(model_name, parameters, historical_data)
+        if symbol: # only run backtest if a symbol is provided
+            return run_backtest(model_name, parameters, symbol, start_date, end_date)  
         else:
             # Run simulation if no symbol is provided
             return run_simulation(model_name, parameters)

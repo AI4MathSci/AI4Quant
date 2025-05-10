@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Dict, Any
 import numpy as np
 from scipy.stats import norm
+from quantfin.backend.utils.data_loader import load_historical_data  # Import the data loader
 
 class RiskModel(BaseModel):
     """
@@ -72,14 +73,26 @@ class RiskModel(BaseModel):
             }
         return result
 
-    def backtest(self, historical_data: Dict[str, Any]) -> Dict[str, Any]:
+    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
-        Backtests the risk management model with historical data.
+        Backtests the portfolio management model with historical price data over a chosen period of time
+
+        Args:
+            symbol (str): The stock symbol.
+            start_date (str): The start date for historical data.
+            end_date (str): The end date for historical data.
+
+        Returns:
+            Dict[str, Any]: The results of the backtest.
+    
         Expects historical_data to include a key "returns", a list of historical return values (in decimals).
         Evaluates the empirical VaR by computing the appropriate return percentile and compares it
         with the frequency of exceedances in the data.
         """
-        print(f"Backtesting risk model with metric: {self.risk_metric} and data: {historical_data.keys()}")
+        print(f"Backtesting risk model with metric: {self.risk_metric} for symbol: {symbol} from {start_date} to {end_date}")
+
+        # Load historical data
+        historical_data = load_historical_data(symbol, start_date, end_date)
         
         returns = historical_data.get("returns", [])
         if not returns:

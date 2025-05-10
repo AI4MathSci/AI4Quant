@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import numpy as np
+from quantfin.backend.utils.data_loader import load_historical_data  # Import the data loader
 
 class PortfolioModel(BaseModel):
     """
@@ -51,17 +52,10 @@ class PortfolioModel(BaseModel):
             # Compound growth: final value = initial allocation * (1 + annual_return)^years
             annual_ret = expected_returns[asset]
             final_value = allocated_capital * ((1 + annual_ret) ** years)
-
-            print(f"----final_value = {final_value}")
-
             asset_final_values[asset] = round(final_value, 2)
  
         final_portfolio_value = sum(asset_final_values.values())
  
-        print(f"----final_portfolio_value = {final_portfolio_value}")
-
-        print(f"----asset_final_values = {asset_final_values}")
-
         return {
             "strategy": self.allocation_strategy,
             "risk_tolerance": self.risk_tolerance,
@@ -72,25 +66,39 @@ class PortfolioModel(BaseModel):
             "message": "Portfolio simulation successful"
         }
 
-    def backtest(self, historical_data: Dict[str, Any]) -> Dict[str, Any]:
+    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
-        Backtests the portfolio management model using provided historical price data.
-        The historical_data dictionary is expected to include a key 'prices' which maps
-        asset class names to lists of historical prices over a given period.
-        """
-        print(f"Backtesting portfolio model with strategy: {self.allocation_strategy} "
-              f"and data: {historical_data.keys()}")
+        Backtests the portfolio management model with historical price data over a chosen period of time
 
-        prices_data = historical_data.get("prices", {})
-        if not prices_data:
+        Args:
+            symbol (str): The stock symbol.
+            start_date (str): The start date for historical data.
+            end_date (str): The end date for historical data.
+
+        Returns:
+            Dict[str, Any]: The results of the backtest.
+        """
+
+        print(f"Backtesting portfolio model with strategy: {self.allocation_strategy} for symbol: {symbol} from {start_date} to {end_date}")
+
+        # Load historical data
+        historical_data = load_historical_data(symbol, start_date, end_date)
+        print(f"---------------historical_datd = {historical_data}")
+
+        # refer to the comment for same line of code in the backtest function of the trading model
+        prices = historical_data[symbol][('Close', symbol)] 
+
+        if prices is None or prices.empty:
             return {
-                "message": "No 'prices' data provided for portfolio backtest."
+                "strategy": self.allocation_strategy,
+                "backtest_results": None,
+                "message": "No 'prices' data provided for backtesting."
             }
 
         # Calculate total return for each asset: (final_price / initial_price) - 1
         asset_returns = {}
         for asset in self.asset_classes:
-            price_series = prices_data.get(asset, None)
+            price_series = prices.get(asset, None)
             if price_series is None or len(price_series) < 2:
                 continue
             start_price = price_series[0]
