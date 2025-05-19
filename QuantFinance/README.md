@@ -36,7 +36,7 @@ quantfin/
 - [uv](https://github.com/astral-sh/uv) - A fast Python package installer and resolver
 - Reddit API credentials (for sentiment analysis)
 
-## Installation
+## Installation and Execution
 
 ### Method 1: Using Virtual Environment
 
@@ -93,6 +93,10 @@ uv run python quantfin/frontend/app.py
 
 The frontend will be available at `http://localhost:7860` or `http://127.0.0.1:7860/`
 
+**Note:** Each of the backend and frontend servers requires its own terminal window to run. If you prefer to use just one terminal, you can run the servers in the background by appending an "&" to each command. For example:
+```bash
+uv run python quantfin/backend/main.py &
+```
 Once both the backend and frontend servers are running, open your browser and navigate to `http://127.0.0.1:7860/` to access the user interface and begin using the system.
 
 ## Configuration
