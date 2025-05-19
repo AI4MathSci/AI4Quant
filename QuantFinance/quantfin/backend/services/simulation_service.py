@@ -6,20 +6,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def run_trading_simulation(model: TradingModel) -> Dict[str, Any]:
+async def run_trading_simulation(model: TradingModel, symbol: str = "AAPL") -> Dict[str, Any]:
     """
     Runs a trading simulation using the provided model.
 
     Args:
         model (TradingModel): The trading model to simulate.
+        symbol (str): The stock symbol to use for sentiment analysis. Defaults to "AAPL".
 
     Returns:
         Dict[str, Any]: The results of the simulation.
     """
-    logger.info("Running trading simulation")
-    return model.simulate()
+    logger.info(f"Running trading simulation with symbol: {symbol}")
+    return await model.simulate(symbol)
 
-def run_portfolio_simulation(model: PortfolioModel) -> Dict[str, Any]:
+async def run_portfolio_simulation(model: PortfolioModel) -> Dict[str, Any]:
     """
     Runs a portfolio simulation using the provided model.
 
@@ -30,9 +31,9 @@ def run_portfolio_simulation(model: PortfolioModel) -> Dict[str, Any]:
         Dict[str, Any]: The results of the simulation.
     """
     logger.info("Running portfolio simulation")
-    return model.simulate()
+    return await model.simulate()
 
-def run_risk_simulation(model: RiskModel) -> Dict[str, Any]:
+async def run_risk_simulation(model: RiskModel) -> Dict[str, Any]:
     """
     Runs a risk simulation using the provided model.
 
@@ -43,4 +44,4 @@ def run_risk_simulation(model: RiskModel) -> Dict[str, Any]:
         Dict[str, Any]: The results of the simulation.
     """
     logger.info("Running risk simulation")
-    return model.simulate()
+    return await model.simulate()
