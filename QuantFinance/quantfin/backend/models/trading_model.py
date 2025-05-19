@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 from typing import Dict, Any
 import numpy as np
 import pandas as pd
 from quantfin.backend.utils.data_loader import load_historical_data  # Import the data loader
+from quantfin.backend.services.sentiment_service import SentimentAnalyzer
 
 class TradingModel(BaseModel):
     """
@@ -11,9 +12,36 @@ class TradingModel(BaseModel):
     initial_capital: float = 100000.0
     strategy: str = "Simple Moving Average"
     sma_window: int = 20
-    # Add more trading-specific parameters as needed
+    use_sentiment: bool = False
+    sentiment_weight: float = 0.3  # Weight given to sentiment in decision making
+    sentiment_threshold: float = 0.2  # Minimum sentiment score to influence decision
 
-    def simulate(self) -> Dict[str, Any]:
+    _sentiment_analyzer: SentimentAnalyzer = PrivateAttr()
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._sentiment_analyzer = SentimentAnalyzer()
+
+    async def get_sentiment_signal(self, symbol: str) -> float:
+        """
+        Gets sentiment signal for a given symbol.
+        Returns a value between -1 and 1, where:
+        -1: Strong negative sentiment
+        0: Neutral sentiment
+        1: Strong positive sentiment
+        """
+        if not self.use_sentiment:
+            return 0.0
+
+        sentiment_data = await self._sentiment_analyzer.get_combined_sentiment(symbol)
+        sentiment_score = sentiment_data["combined_sentiment_score"]
+        # Only use sentiment if it exceeds the threshold
+        if abs(sentiment_score) < self.sentiment_threshold:
+            return 0.0
+            
+        return sentiment_score
+
+    async def simulate(self, symbol: str = "AAPL") -> Dict[str, Any]:
         """
         Simulates the trading model.
         """
@@ -35,21 +63,37 @@ class TradingModel(BaseModel):
             
             # Compute simple moving average
             sma = prices_series.rolling(window=self.sma_window, min_periods=1).mean()
-            # Generate signals: +1 when price is above SMA, -1 when below
-            signals = (prices_series > sma).astype(int)
-            signals[signals == 0] = -1
+            
+            # Generate technical signals: +1 when price is above SMA, -1 when below
+            technical_signals = (prices_series > sma).astype(int)
+            technical_signals[technical_signals == 0] = -1
+            
+            # If sentiment analysis is enabled, incorporate sentiment signals
+            if self.use_sentiment:
+                # Get real sentiment signal
+                sentiment_signal = await self.get_sentiment_signal(symbol)
+                # Create sentiment signals array with the same sentiment value
+                sentiment_signals = np.full(len(prices_series), sentiment_signal)
+                # Combine technical and sentiment signals
+                combined_signals = (1 - self.sentiment_weight) * technical_signals + self.sentiment_weight * sentiment_signals
+                signals = np.sign(combined_signals)
+            else:
+                signals = technical_signals
             
             # Count transactions: each signal change is a transaction
-            transactions = int(signals.diff().abs().sum())
-            
+            transactions = int(pd.Series(signals).diff().abs().sum())
+                        
             # Simulate portfolio evolution: assume fully invested when signal==1, otherwise in cash.
             # For simplicity, assume the portfolio value follows the price evolution if invested.
             position_value = self.initial_capital * (prices_series.iloc[-1] / prices_series.iloc[0]) if signals.iloc[-1] == 1 else self.initial_capital
+            #print(f"position_value: {position_value}")
             result = {
                 "strategy": self.strategy,
                 "initial_capital": self.initial_capital,
                 "final_portfolio_value": round(position_value, 2),
                 "transactions": transactions,
+                "use_sentiment": self.use_sentiment,
+                "sentiment_weight": self.sentiment_weight if self.use_sentiment else None,
                 "message": "Trading simulation successful (Simple Moving Average)"
             }
             return result
@@ -77,6 +121,7 @@ class TradingModel(BaseModel):
                 "initial_capital": self.initial_capital,
                 "final_portfolio_value": round(final_value, 2),
                 "transactions": 1,
+                "use_sentiment": self.use_sentiment,
                 "message": "Trading simulation successful (Buy and Hold)"
             }
         else:
@@ -85,10 +130,11 @@ class TradingModel(BaseModel):
                 "initial_capital": self.initial_capital,
                 "final_portfolio_value": self.initial_capital,
                 "transactions": 0,
+                "use_sentiment": self.use_sentiment,
                 "message": "Trading simulation successful (Unknown Strategy)"
             }
 
-    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+    async def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
         Backtests the trading model with historical price data over a chosen period of time
 
@@ -126,24 +172,41 @@ class TradingModel(BaseModel):
         
         if self.strategy == "Simple Moving Average":
             sma = prices_series.rolling(window=self.sma_window, min_periods=1).mean()
-            signals = (prices_series > sma).astype(int)
-            signals[signals == 0] = -1
-            transactions = int(signals.diff().abs().sum())
+            technical_signals = (prices_series > sma).astype(int)
+            technical_signals[technical_signals == 0] = -1
+            
+            # If sentiment analysis is enabled, get real sentiment data
+            if self.use_sentiment:
+                sentiment_signal = await self.get_sentiment_signal(symbol)
+                # Apply sentiment signal to all periods (simplified approach)
+                sentiment_signals = pd.Series([sentiment_signal] * len(prices_series))
+                # Combine technical and sentiment signals
+                combined_signals = (1 - self.sentiment_weight) * technical_signals + self.sentiment_weight * sentiment_signals
+                signals = np.sign(combined_signals)
+            else:
+                signals = technical_signals
+            
+            transactions = int(pd.Series(signals).diff().abs().sum())
             final_value = self.initial_capital * (prices_series.iloc[-1] / prices_series.iloc[0]) if signals.iloc[-1] == 1 else self.initial_capital
+            
             backtest_results = {
                 "final_portfolio_value": round(final_value, 2),
-                "transactions": transactions
+                "transactions": transactions,
+                "use_sentiment": self.use_sentiment,
+                "sentiment_weight": self.sentiment_weight if self.use_sentiment else None
             }
         elif self.strategy == "Buy and Hold":
             final_value = self.initial_capital * (prices_series.iloc[-1] / prices_series.iloc[0])
             backtest_results = {
                 "final_portfolio_value": round(final_value, 2),
-                "transactions": 1
+                "transactions": 1,
+                "use_sentiment": self.use_sentiment
             }
         else:
             backtest_results = {
                 "final_portfolio_value": self.initial_capital,
-                "transactions": 0
+                "transactions": 0,
+                "use_sentiment": self.use_sentiment
             }
         
         return {

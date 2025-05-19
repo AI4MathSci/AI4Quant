@@ -28,6 +28,7 @@ app.add_middleware(
 class SimulationRequest(BaseModel):
     model_name: str
     parameters: Dict[str, Any]
+    symbol: str = "AAPL"  # Default to AAPL if not provided
 
 class BacktestRequest(BaseModel):
     model_name: str
@@ -41,12 +42,12 @@ class HealthCheckResponse(BaseModel):
     # version: str = config.app_version  # Access version from config   # comment this out since it raises error of "config does not have attrivute app_version"
     version: str = "Version 01"  # put this in to replace the above line during debugging to avoid the error
 
-@app.get("/health", response_model=HealthCheckResponse)
-async def health_check():
+@app.get("/health")
+async def health_check() -> Dict[str, str]:
     """
-    Endpoint for checking the health of the API.
+    Health check endpoint.
     """
-    return HealthCheckResponse()
+    return {"status": "OK", "version": "0.1.0"}
 
 @app.post("/simulate")
 async def run_simulation(request: SimulationRequest) -> Dict[str, Any]:
@@ -54,7 +55,7 @@ async def run_simulation(request: SimulationRequest) -> Dict[str, Any]:
     Endpoint for running quantitative finance simulations.
 
     Args:
-        request (SimulationRequest): The simulation request containing the model name and parameters.
+        request (SimulationRequest): The simulation request containing the model name, parameters, and symbol.
 
     Returns:
         Dict[str, Any]: The results of the simulation.
@@ -65,13 +66,13 @@ async def run_simulation(request: SimulationRequest) -> Dict[str, Any]:
     try:
         if request.model_name == "Algorithmic Trading Model":
             model = trading_model.TradingModel(**request.parameters)  # type: ignore
-            results = simulation_service.run_trading_simulation(model)
+            results = await simulation_service.run_trading_simulation(model, request.symbol)
         elif request.model_name == "Portfolio Management Model":
             model = portfolio_model.PortfolioModel(**request.parameters) # type: ignore
-            results = simulation_service.run_portfolio_simulation(model)
+            results = await simulation_service.run_portfolio_simulation(model)
         elif request.model_name == "Risk Management Model":
             model = risk_model.RiskModel(**request.parameters) # type: ignore
-            results = simulation_service.run_risk_simulation(model)
+            results = await simulation_service.run_risk_simulation(model)
         else:
             raise HTTPException(status_code=400, detail="Model not found")
         return results
@@ -96,13 +97,13 @@ async def run_backtest(request: BacktestRequest) -> Dict[str, Any]:
     try:
         if request.model_name == "Algorithmic Trading Model":
             model = trading_model.TradingModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_trading_backtest(model, request.symbol, request.start_date, request.end_date)
+            results = await backtesting_service.run_trading_backtest(model, request.symbol, request.start_date, request.end_date)
         elif request.model_name == "Portfolio Management Model":
             model = portfolio_model.PortfolioModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_portfolio_backtest(model, request.symbol, request.start_date, request.end_date)
+            results = await backtesting_service.run_portfolio_backtest(model, request.symbol, request.start_date, request.end_date)
         elif request.model_name == "Risk Management Model":
             model = risk_model.RiskModel(**request.parameters) # type: ignore
-            results = backtesting_service.run_risk_backtest(model, request.symbol, request.start_date, request.end_date)
+            results = await backtesting_service.run_risk_backtest(model, request.symbol, request.start_date, request.end_date)
         else:
             raise HTTPException(status_code=400, detail="Model not found")
         return results

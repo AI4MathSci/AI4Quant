@@ -13,14 +13,14 @@ class PortfolioModel(BaseModel):
     asset_classes: List[str] = ["Stocks", "Bonds", "Cash"]
     # Add more portfolio-specific parameters if needed
 
-    def simulate(self) -> Dict[str, Any]:
+    async def simulate(self) -> Dict[str, Any]:
         """
         Simulates the portfolio management model by projecting the final portfolio value
         over a fixed holding period (e.g., 5 years) using assumed annual return rates
         that vary by asset class and risk tolerance.
         """
         print(f"Simulating portfolio with strategy: {self.allocation_strategy}, "
-              f"risk tolerance: {self.risk_tolerance}, and initial capital: {self.initial_capital}")
+              f"risk_tolerance: {self.risk_tolerance}, and initial capital: {self.initial_capital}")
 
         # Determine allocation weights.
         # Currently, if allocation_strategy is "Equal Weight" or unrecognized, use equal allocation.
@@ -66,7 +66,7 @@ class PortfolioModel(BaseModel):
             "message": "Portfolio simulation successful"
         }
 
-    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+    async def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
         Backtests the portfolio management model with historical price data over a chosen period of time
 
@@ -83,7 +83,6 @@ class PortfolioModel(BaseModel):
 
         # Load historical data
         historical_data = load_historical_data(symbol, start_date, end_date)
-        print(f"---------------historical_datd = {historical_data}")
 
         # refer to the comment for same line of code in the backtest function of the trading model
         prices = historical_data[symbol][('Close', symbol)] 
@@ -113,27 +112,22 @@ class PortfolioModel(BaseModel):
 
         # Again, use the allocation strategy (here, "Equal Weight" by default) to allocate capital.
         num_assets = len(self.asset_classes)
-        weights = {asset: 1/num_assets for asset in self.asset_classes}
+        allocation = 1.0 / num_assets  # Equal weight allocation
 
-        # Compute the final portfolio value using the historical return for each asset.
-        asset_final_values = {}
-        for asset in self.asset_classes:
-            weight = weights.get(asset, 0)
-            allocated_capital = self.initial_capital * weight
-            if asset in asset_returns:
-                # Apply the asset’s total return over the backtest period.
-                final_value = allocated_capital * (1 + asset_returns[asset])
-            else:
-                final_value = allocated_capital  # assume no change if no data available
-            asset_final_values[asset] = round(final_value, 2)
+        # Calculate portfolio return
+        portfolio_return = sum(return_value * allocation for return_value in asset_returns.values())
+        final_value = self.initial_capital * (1 + portfolio_return)
 
-        final_portfolio_value = sum(asset_final_values.values())
+        backtest_results = {
+            "final_portfolio_value": round(final_value, 2),
+            "portfolio_return": round(portfolio_return, 4),
+            "asset_returns": {asset: round(return_value, 4) for asset, return_value in asset_returns.items()},
+            "allocation": allocation
+        }
+
         return {
             "strategy": self.allocation_strategy,
-            "initial_capital": self.initial_capital,
-            "final_portfolio_value": round(final_portfolio_value, 2),
-            "asset_allocation": weights,
-            "asset_final_values": asset_final_values,
+            "backtest_results": backtest_results,
             "historical_data_keys": list(historical_data.keys()),
-            "message": "Portfolio backtest successful"
+            "message": "Portfolio model backtest successful"
         }

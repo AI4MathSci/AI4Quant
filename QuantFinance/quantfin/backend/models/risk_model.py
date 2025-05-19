@@ -14,7 +14,7 @@ class RiskModel(BaseModel):
     portfolio_value: float = 1000000.0
     daily_volatility: float = 0.01  # Assumed daily volatility (e.g., 1%)
 
-    def simulate(self) -> Dict[str, Any]:
+    async def simulate(self) -> Dict[str, Any]:
         """
         Simulates the risk management model.
         Uses parametric methods to compute VaR or ES based on a normal distribution assumption.
@@ -73,7 +73,7 @@ class RiskModel(BaseModel):
             }
         return result
 
-    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+    async def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
         Backtests the portfolio management model with historical price data over a chosen period of time
 
