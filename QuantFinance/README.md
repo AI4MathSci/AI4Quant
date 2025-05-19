@@ -97,6 +97,8 @@ The frontend will be available at `http://localhost:7860` or `http://127.0.0.1:7
 ```bash
 uv run python quantfin/backend/main.py &
 ```
+When you are finished using the system, make sure to terminate both the backend and frontend servers. To do this, identify and stop the processes listening on port 8000 (backend server) and port 7860 (frontend server). This cleanup is important to ensure these ports are available the next time you need to use the system.
+
 Once both the backend and frontend servers are running, open your browser and navigate to `http://127.0.0.1:7860/` to access the user interface and begin using the system.
 
 ## Configuration

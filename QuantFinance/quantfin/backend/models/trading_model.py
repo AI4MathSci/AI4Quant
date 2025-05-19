@@ -134,7 +134,7 @@ class TradingModel(BaseModel):
                 "message": "Trading simulation successful (Unknown Strategy)"
             }
 
-    def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+    async def backtest(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """
         Backtests the trading model with historical price data over a chosen period of time
 
@@ -177,7 +177,7 @@ class TradingModel(BaseModel):
             
             # If sentiment analysis is enabled, get real sentiment data
             if self.use_sentiment:
-                sentiment_signal = self.get_sentiment_signal(symbol)
+                sentiment_signal = await self.get_sentiment_signal(symbol)
                 # Apply sentiment signal to all periods (simplified approach)
                 sentiment_signals = pd.Series([sentiment_signal] * len(prices_series))
                 # Combine technical and sentiment signals
