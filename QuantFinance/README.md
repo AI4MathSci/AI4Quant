@@ -45,18 +45,15 @@ quantfin/
 git clone https://github.com/AI4MathSci/AI4Quant.git
 cd AI4Quant
 ```
-
 2. Create a virtual environment with uv:
 ```bash
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
-
 3. Install dependencies with uv:
 ```bash
 uv pip install .
 ```
-
 4. Set up environment variables:
    - Copy `.env.template` to `.env`
    - Fill in the required credentials (see Configuration section)
@@ -65,12 +62,10 @@ uv pip install .
 ```bash
 python quantfin/backend/main.py 
 ```
-
 6. Run the frontend server:
 ```bash
 python quantfin/frontend/app.py 
 ```
-
 ### Method 2: Direct Execution
 
 1. Clone the repository:
@@ -78,14 +73,12 @@ python quantfin/frontend/app.py
 git clone https://github.com/AI4MathSci/AI4Quant.git
 cd AI4Quant
 ```
-
 2. Set up environment variables (see Configuration section)
 
 3. Run the backend server:
 ```bash
 uv run python quantfin/backend/main.py
 ```
-
 4. Run the frontend server:
 ```bash
 uv run python quantfin/frontend/app.py 
@@ -93,13 +86,13 @@ uv run python quantfin/frontend/app.py
 
 The frontend will be available at `http://localhost:7860` or `http://127.0.0.1:7860/`
 
-**Note:** Each of the backend and frontend servers requires its own terminal window to run. If you prefer to use just one terminal, you can run the servers in the background by appending an "&" to each command. For example:
+**Note:** Each of the backend and frontend servers requires its own terminal window to run. If you prefer useing just one terminal, you can run the servers in the background by appending an "&" to each command. For example:
 ```bash
 uv run python quantfin/backend/main.py &
 ```
-When you are finished using the system, make sure to terminate both the backend and frontend servers. To do this, identify and stop the processes listening on port 8000 (backend server) and port 7860 (frontend server). This cleanup is important to ensure these ports are available the next time you need to use the system.
+Once both the backend and frontend servers are up, open your browser and navigate to `http://127.0.0.1:7860/` or `http://localhost:7860` to access the user interface and begin using the system.
 
-Once both the backend and frontend servers are running, open your browser and navigate to `http://127.0.0.1:7860/` to access the user interface and begin using the system.
+When you are finished using the system, make sure to terminate both the backend and frontend servers. To do this, identify and stop the processes listening on port 8000 (backend server) and port 7860 (frontend server). This cleanup is important to ensure these ports are available the next time you need to use the system.
 
 ## Configuration
 
@@ -109,7 +102,6 @@ Once both the backend and frontend servers are running, open your browser and na
 ```bash
 cp .env.template .env
 ```
-
 2. Configure the following variables in `.env`:
 ```
 # Reddit API Credentials
