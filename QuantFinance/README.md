@@ -168,27 +168,6 @@ Sentiment analysis can be enabled/disabled and weighted in the trading decisions
   - Weight in decision making
   - Threshold for signal generation
 
-## Development
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Code Style
-
-The project uses:
-- Black for code formatting
-- isort for import sorting
-- ruff for linting
-
-Format code:
-```bash
-black .
-isort .
-```
-
 ## Contributing
 
 1. Fork the repository
