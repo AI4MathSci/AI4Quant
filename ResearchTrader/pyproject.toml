@@ -1,0 +1,64 @@
+[project]
+name = "research_trader"
+version = "0.1.0"
+description = "FastAPI backend for ResearchTrader application."
+authors = [
+  { name="Mohamed Arshath", email="marshath@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "fastapi>=0.103.0",
+    "uvicorn[standard]>=0.23.2",
+    "pydantic[email]>=1.9.0,<3.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.25.0",
+    "python-dotenv>=0.20.0",
+    "async-lru>=2.0.4",
+    "gradio>=3.40.0",
+    "arxiv>=2.2.0",
+    "PyPDF2>=3.0.0",
+    "pdfminer.six>=20221105",
+    "python-multipart>=0.0.5", # For file uploads
+    "aiohttp>=3.11.16",
+    "pip>=25.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.18.0",
+    "httpx>=0.25.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "ruff>=0.0.270",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["research_trader"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = ["nbs/"]
+
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
