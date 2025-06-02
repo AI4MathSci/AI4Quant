@@ -1,5 +1,6 @@
 import random
 from collections import Counter
+from utils.config import CONFIG
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -18,7 +19,11 @@ def run_experiment():
     results = []
 
     for noise in noise_levels:
-        signals = generate_mock_signals(noise=noise)
+        signals = generate_mock_signals(
+    true_signal=CONFIG["true_signal"],
+    num_chains=CONFIG["num_reasoning_chains"],
+    noise=CONFIG["noise_level"]
+)
         voted = simulate_shortmak(signals)
         results.append({
             "noise": noise,
