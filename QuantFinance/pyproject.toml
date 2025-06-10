@@ -1,7 +1,7 @@
 [project]
 name = "quantfin"
 version = "0.1.0"
-description = "Quantitative Finance System"
+description = "Quantitative Finance Application with Algorithmic Trading, Portfolio Management, and Risk Management"
 authors = [
   { name="Henry Jiang", email="henryjiang18@gmail.com" },
 ]
@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.10"
 
 dependencies = [
+    # Core Framework Dependencies
     "fastapi>=0.103.0",
     "uvicorn[standard]>=0.23.2",
     "pydantic[email]>=1.9.0,<3.0.0",
@@ -19,17 +20,39 @@ dependencies = [
     "async-lru>=2.0.4",
     "gradio>=3.40.0",
     "python-multipart>=0.0.5", # For file uploads
-    "aiohttp>=3.11.16",
+    "aiohttp>=3.8.0",          # For SEC EDGAR API integration
     "pip>=25.0.1",
-    # The following are not in original file, need to add it
-    "yfinance>=0.2.36",
-    "scipy>=1.12.0",
-    # Sentiment analysis dependencies
-    "textblob>=0.17.1",
-    "beautifulsoup4>=4.12.0",
+    
+    # Data Processing Dependencies
+    "pandas>=2.1.0",
+    "numpy>=1.24.0",
     "requests>=2.31.0",
-    "asyncpraw>=7.7.1",  # For Reddit API access
+    
+    # NEW: Algorithmic Trading Dependencies
+    "backtrader>=1.9.78.123",      # For trading strategies (SMA, RSI, Bollinger Bands)
+    
+    # NEW: Portfolio Management Dependencies
+    "pyportfolioopt>=1.5.5",       # FIXED: Correct package name for portfolio optimization
+    "scikit-learn>=1.3.0",         # For advanced portfolio strategies
+    
+    # NEW: Risk Management Dependencies
+    "empyrical>=0.5.5",            # For risk metrics (VaR, Expected Shortfall)
+    
+    # Data Provider Dependencies
+    "yfinance>=0.2.36",            # For fetching financial data
+    "scipy>=1.12.0",               # Required by pyportfolioopt for optimization
+    
+    # Utility Dependencies
+    "loguru>=0.7.2",               # Enhanced logging
 
+    # LlamaIndex Financial Analysis Dependencies
+    "llama-index>=0.9.0",          # Core LlamaIndex for document processing
+    "llama-index-llms-openai>=0.1.0",  # OpenAI LLM integration
+    "llama-index-embeddings-openai>=0.1.0",  # OpenAI embeddings
+    "llama-index-readers-web>=0.1.0",  # Web content readers
+    "openai>=1.0.0",               # Core OpenAI client
+    "beautifulsoup4>=4.10.0",      # For web scraping financial data
+    "feedparser>=6.0.0",           # For parsing RSS feeds
 ]
 
 [project.optional-dependencies]
@@ -61,7 +84,6 @@ line_length = 100
 target-version = "py310"
 line-length = 100
 exclude = ["nbs/"]
-
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

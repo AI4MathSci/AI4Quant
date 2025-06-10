@@ -1,19 +1,20 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
-#from .services import simulation_service, backtesting_service
-#from .models import trading_model, portfolio_model, risk_model
-from quantfin.backend.services import simulation_service, backtesting_service
-from quantfin.backend.models import trading_model, portfolio_model, risk_model
 from fastapi.middleware.cors import CORSMiddleware
+import os
 import logging
-from quantfin.backend.config import config  # Import the config
+
+from quantfin.backend.models.trading_model import TradingModel
+from quantfin.backend.models.portfolio_model import PortfolioModel
+from quantfin.backend.models.risk_model import RiskModel
+from quantfin.backend.config.config import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(title="QuantFin API", version="1.0.0")
 
 # Add CORS middleware to allow cross-origin requests (for development)
 app.add_middleware(
@@ -24,92 +25,106 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Data validation models using Pydantic
-class SimulationRequest(BaseModel):
-    model_name: str
-    parameters: Dict[str, Any]
-    symbol: str = "AAPL"  # Default to AAPL if not provided
-
-class BacktestRequest(BaseModel):
-    model_name: str
-    parameters: Dict[str, Any]
-    symbol: str
-    start_date: str
-    end_date: str
-
-class HealthCheckResponse(BaseModel):
-    status: str = "OK"
-    # version: str = config.app_version  # Access version from config   # comment this out since it raises error of "config does not have attrivute app_version"
-    version: str = "Version 01"  # put this in to replace the above line during debugging to avoid the error
+@app.get("/")
+async def root():
+    return {"message": "QuantFin API is running"}
 
 @app.get("/health")
 async def health_check() -> Dict[str, str]:
     """
     Health check endpoint.
     """
-    return {"status": "OK", "version": "0.1.0"}
+    return {"status": "OK", "version": "1.0.0"}
 
-@app.post("/simulate")
-async def run_simulation(request: SimulationRequest) -> Dict[str, Any]:
-    """
-    Endpoint for running quantitative finance simulations.
+@app.get("/config/openai-status")
+async def get_openai_status():
+    """Check if OpenAI API key is configured for sentiment analysis"""
+    return {"configured": config.has_openai_key}
 
-    Args:
-        request (SimulationRequest): The simulation request containing the model name, parameters, and symbol.
-
-    Returns:
-        Dict[str, Any]: The results of the simulation.
-
-    Raises:
-        HTTPException: If the model is not found or an error occurs during simulation.
-    """
+# Trading endpoints
+@app.post("/trading/simulate/{symbol}")
+async def trading_simulate(symbol: str, request: dict):
+    """Simulate trading strategy"""
     try:
-        if request.model_name == "Algorithmic Trading Model":
-            model = trading_model.TradingModel(**request.parameters)  # type: ignore
-            results = await simulation_service.run_trading_simulation(model, request.symbol)
-        elif request.model_name == "Portfolio Management Model":
-            model = portfolio_model.PortfolioModel(**request.parameters) # type: ignore
-            results = await simulation_service.run_portfolio_simulation(model)
-        elif request.model_name == "Risk Management Model":
-            model = risk_model.RiskModel(**request.parameters) # type: ignore
-            results = await simulation_service.run_risk_simulation(model)
-        else:
-            raise HTTPException(status_code=400, detail="Model not found")
-        return results
+        model = TradingModel(**request)
+        return await model.simulate(symbol)
     except Exception as e:
-        logger.error(f"Error running simulation: {e}")
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+        import traceback
+        logger.error(f"Trading simulation error: {e}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/backtest")
-async def run_backtest(request: BacktestRequest) -> Dict[str, Any]:
-    """
-    Endpoint for backtesting quantitative finance models with historical data.
-
-    Args:
-        request (BacktestRequest): The backtest request containing the model name, parameters, and historical data.
-
-    Returns:
-        Dict[str, Any]: The results of the backtest.
-
-    Raises:
-        HTTPException: If the model is not found or an error occurs during backtesting.
-    """
+@app.post("/trading/backtest/{symbol}")
+async def trading_backtest(symbol: str, request: dict):
+    """Backtest trading strategy"""
     try:
-        if request.model_name == "Algorithmic Trading Model":
-            model = trading_model.TradingModel(**request.parameters) # type: ignore
-            results = await backtesting_service.run_trading_backtest(model, request.symbol, request.start_date, request.end_date)
-        elif request.model_name == "Portfolio Management Model":
-            model = portfolio_model.PortfolioModel(**request.parameters) # type: ignore
-            results = await backtesting_service.run_portfolio_backtest(model, request.symbol, request.start_date, request.end_date)
-        elif request.model_name == "Risk Management Model":
-            model = risk_model.RiskModel(**request.parameters) # type: ignore
-            results = await backtesting_service.run_risk_backtest(model, request.symbol, request.start_date, request.end_date)
-        else:
-            raise HTTPException(status_code=400, detail="Model not found")
-        return results
+        model = TradingModel(**request)
+        return await model.backtest(symbol)
     except Exception as e:
-        logger.error(f"Error running backtest: {e}")
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+        logger.error(f"Trading backtest error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Portfolio endpoints
+@app.post("/portfolio/optimize")
+async def portfolio_optimize(request: dict):
+    """Optimize portfolio"""
+    try:
+        model = PortfolioModel(**request)
+        return await model.optimize()
+    except Exception as e:
+        logger.error(f"Portfolio optimization error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/portfolio/simulate")
+async def portfolio_simulate(request: dict):
+    """Simulate portfolio strategy"""
+    try:
+        model = PortfolioModel(**request)
+        return await model.simulate()
+    except Exception as e:
+        logger.error(f"Portfolio simulation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/portfolio/backtest")
+async def portfolio_backtest(request: dict):
+    """Backtest portfolio strategy"""
+    try:
+        model = PortfolioModel(**request)
+        return await model.backtest()
+    except Exception as e:
+        logger.error(f"Portfolio backtest error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Risk endpoints
+@app.post("/risk/analyze")
+async def risk_analyze(request: dict):
+    """Analyze risk"""
+    try:
+        model = RiskModel(**request)
+        return await model.analyze()
+    except Exception as e:
+        logger.error(f"Risk analysis error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/risk/simulate")
+async def risk_simulate(request: dict):
+    """Simulate risk analysis"""
+    try:
+        model = RiskModel(**request)
+        return await model.simulate()
+    except Exception as e:
+        logger.error(f"Risk simulation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/risk/backtest")
+async def risk_backtest(request: dict):
+    """Backtest risk analysis"""
+    try:
+        model = RiskModel(**request)
+        return await model.backtest()
+    except Exception as e:
+        logger.error(f"Risk backtest error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
