@@ -182,28 +182,12 @@ OPENAI_MODEL=gpt-4  # or gpt-3.5-turbo
 
 ### Getting OpenAI API Key
 
-<<<<<<< HEAD
-1. Go to https://www.reddit.com/prefs/apps
-2. Click "create another app..."
-3. Fill in the required information:
-   - Name: Your app name
-   - Type: Script
-   - Description: Optional
-   - About URL: Optional
-   - Redirect URI: http://localhost:8080
-4. Click "create app"
-5. Note down the credentials:
-   - Client ID: The string under "personal use script"
-   - Client Secret: The string labeled "secret"
-   - User Agent: The string labeled "developers"
-=======
 1. Visit [OpenAI API Platform](https://platform.openai.com/)
 2. Create an account or sign in
 3. Navigate to API Keys section
 4. Generate a new API key
 5. Add billing information (required for API usage)
 6. Copy the key to your `.env` file
->>>>>>> 76faa53 (more sophisticated trading strategies, sentiment analysis, back testing)
 
 **Note**: Without an OpenAI API key, sentiment analysis will be disabled, but technical trading strategies will work normally.
 
