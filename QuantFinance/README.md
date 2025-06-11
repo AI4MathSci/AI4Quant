@@ -102,7 +102,31 @@ quantfin/
 
 ## ⚡ Quick Start
 
-### Method 1: Virtual Environment Setup
+
+### Method 1: Direct Execution
+
+1. **Clone repository**:
+```bash
+git clone https://github.com/AI4MathSci/AI4Quant.git
+cd AI4Quant/QuantFinance
+```
+
+2. **Configure environment** (see [Configuration](#-configuration) section below):
+```bash
+cp .env.template .env
+# Edit .env with your OpenAI API key
+```
+
+3. **Launch servers**:
+```bash
+# Terminal 1 - Backend
+uv run python quantfin/backend/main.py
+
+# Terminal 2 - Frontend
+uv run python quantfin/frontend/app.py
+```
+
+### Method 2: Virtual Environment Setup
 
 1. **Clone and setup**:
 ```bash
@@ -128,29 +152,6 @@ python quantfin/backend/main.py
 python quantfin/frontend/app.py
 ```
 
-### Method 2: Direct Execution
-
-1. **Clone repository**:
-```bash
-git clone https://github.com/AI4MathSci/AI4Quant.git
-cd AI4Quant/QuantFinance
-```
-
-2. **Configure environment** (see [Configuration](#-configuration) section below):
-```bash
-cp .env.template .env
-# Edit .env with your OpenAI API key
-```
-
-3. **Launch servers**:
-```bash
-# Terminal 1 - Backend
-uv run python quantfin/backend/main.py
-
-# Terminal 2 - Frontend
-uv run python quantfin/frontend/app.py
-```
-
 **Note:** Each of the backend and frontend servers requires its own terminal window to run. If you prefer useing just one terminal, you can run the servers in the background by appending an "&" to each command. For example:
 ```bash
 uv run python quantfin/backend/main.py &
@@ -158,8 +159,6 @@ uv run python quantfin/backend/main.py &
 **Access the platform**: Once both the backend and frontend servers are up, open your browser and navigate to `http://127.0.0.1:7860/` or `http://localhost:7860` to access the user interface and begin using the system.
 
 When you are finished using the system, make sure to terminate both the backend and frontend servers. To do this, identify and stop the processes listening on port 8000 (backend server) and port 7860 (frontend server). This cleanup is important to ensure these ports are available the next time you need to use the system.
-
-
 
 
 ## 🔧 Configuration
