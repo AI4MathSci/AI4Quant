@@ -124,7 +124,7 @@ REDDIT_USER_AGENT=your_user_agent
 5. Note down the credentials:
    - Client ID: The string under "personal use script"
    - Client Secret: The string labeled "secret"
-   - User Agent: Format: "platform:app_name:version (by /u/username)"
+   - User Agent: The string labeled "developers"
 
 ## Usage
 
