@@ -71,6 +71,20 @@ def trading_interface():
             margin-top: 20px !important;
             margin-bottom: 10px !important;
         }
+        /* Trading Results Styling */
+        #trading-results {
+            min-height: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        
+        #trading-results table {
+            font-size: 14px;
+        }
         """) as demo:
         gr.Markdown("# 📈 Trading Strategy Simulator")
         
@@ -719,148 +733,784 @@ Please review the error message and adjust your settings accordingly.
 
 # Portfolio Interface
 def portfolio_interface():
-    with gr.Blocks(title="Portfolio Optimization") as demo:
-        gr.Markdown("# 📊 Portfolio Optimization")
+    with gr.Blocks(title="Portfolio Management", css="""
+        /* Portfolio Results Styling */
+        #portfolio-results {
+            min-height: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        
+        #portfolio-results table {
+            font-size: 14px;
+        }
+        """) as demo:
+        gr.Markdown("# 📊 Portfolio Management")
         
         with gr.Row():
             with gr.Column(scale=1):
+                # Input Controls
+                gr.Markdown("### 📋 Portfolio Configuration")
+                
                 symbols_input = gr.Textbox(
                     label="Stock Symbols (comma-separated)",
-                    placeholder="e.g., AAPL,GOOGL,MSFT",
-                    value="AAPL,GOOGL,MSFT"
+                    placeholder="AAPL,GOOGL,MSFT,AMZN",
+                    value="AAPL,GOOGL,MSFT,AMZN"
                 )
                 
-                start_date = gr.Textbox(
-                    label="Start Date (YYYY-MM-DD)",
-                    value=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-                )
+                with gr.Row():
+                    start_date = gr.Textbox(
+                        label="Start Date (YYYY-MM-DD)",
+                        placeholder="2023-01-01",
+                        value="2023-01-01"
+                    )
+                    end_date = gr.Textbox(
+                        label="End Date (YYYY-MM-DD)",
+                        placeholder="2024-01-01",
+                        value="2024-01-01"
+                    )
                 
-                end_date = gr.Textbox(
-                    label="End Date (YYYY-MM-DD)",
-                    value=datetime.now().strftime("%Y-%m-%d")
-                )
+                with gr.Row():
+                    strategy_dropdown = gr.Dropdown(
+                        choices=["Equal Weight", "Mean Variance Optimization", "Momentum"],
+                        label="Strategy (for Simulate/Backtest)",
+                        value="Equal Weight"
+                    )
+                    initial_capital = gr.Number(
+                        label="Initial Capital ($)",
+                        value=100000,
+                        minimum=1000
+                    )
                 
-                simulate_btn = gr.Button("Simulate", variant="primary")
+                with gr.Row():
+                    target_return = gr.Slider(
+                        minimum=0.05,
+                        maximum=0.25,
+                        value=0.12,
+                        step=0.01,
+                        label="Target Return (for Mean Variance)",
+                        info="Annual target return for optimization"
+                    )
+                    lookback_period = gr.Slider(
+                        minimum=60,
+                        maximum=504,
+                        value=252,
+                        step=30,
+                        label="Lookback Period (for Momentum)",
+                        info="Trading days for momentum calculation"
+                    )
             
             with gr.Column(scale=2):
-                portfolio_output = gr.JSON(label="Portfolio Results")
+                # Action Buttons in upper right
+                gr.Markdown("### 🚀 Analysis Options")
+                
+                with gr.Row():
+                    simulate_btn = gr.Button("📈 Simulate", variant="primary", size="lg")
+                    optimize_btn = gr.Button("🎯 Optimize", variant="primary", size="lg")
+                    backtest_btn = gr.Button("📊 Backtest", variant="primary", size="lg")
+                
+                # Help Text below buttons
+                with gr.Accordion("ℹ️ Analysis Types", open=False):
+                    gr.Markdown("""
+                    **Simulate**: Forward-looking projections using selected strategy and parameters
+                    
+                    **Optimize**: Tests multiple strategies and parameters to find the best configuration
+                    
+                    **Backtest**: Historical performance analysis using selected strategy and parameters
+                    """)
+                
+                # Results Display below help text
+                portfolio_output = gr.HTML(
+                    value="<div style='text-align: center; padding: 50px; color: #666;'>📊 Select an analysis type and configure your portfolio to get started</div>",
+                    elem_id="portfolio-results"
+                )
         
-        def validate_and_simulate(symbols_str, start_date, end_date):
-            logger.info(f"Running portfolio optimization for symbols: {symbols_str}")
-            symbols = [s.strip().upper() for s in symbols_str.split(",")]
-            invalid_symbols = [s for s in symbols if not is_valid_symbol(s)]
-            
-            if invalid_symbols:
-                return {"error": f"Invalid symbols: {', '.join(invalid_symbols)}"}
-            
+        # Event Handlers
+        def validate_and_process(symbols_str, start_date, end_date, strategy, initial_capital, target_return, lookback_period, action_type):
+            """Validate inputs and call appropriate backend endpoint"""
             try:
+                # Validate symbols
+                symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
+                if not symbols:
+                    return "<div style='color: red;'>❌ Please enter at least one stock symbol</div>"
+                
+                # Validate symbols using yfinance
+                try:
+                    test_data = yf.download(symbols, period="5d", progress=False)
+                    if test_data.empty:
+                        return "<div style='color: red;'>❌ No data found for the provided symbols</div>"
+                except Exception as e:
+                    return f"<div style='color: red;'>❌ Error validating symbols: {str(e)}</div>"
+                
+                # Prepare request data
                 portfolio_data = {
                     "asset_symbols": symbols,
                     "start_date": start_date,
-                    "end_date": end_date
+                    "end_date": end_date,
+                    "strategy": strategy,
+                    "initial_capital": float(initial_capital),
+                    "target_return": float(target_return),
+                    "lookback_period": int(lookback_period)
                 }
                 
-                logger.info(f"Sending portfolio optimization request")
-                response = requests.post(
-                    f"{API_BASE_URL}/portfolio/simulate",
-                    json=portfolio_data
-                )
+                # Call appropriate endpoint
+                if action_type == "simulate":
+                    response = requests.post(f"{API_BASE_URL}/portfolio/simulate", json=portfolio_data)
+                elif action_type == "optimize":
+                    response = requests.post(f"{API_BASE_URL}/portfolio/optimize", json=portfolio_data)
+                elif action_type == "backtest":
+                    response = requests.post(f"{API_BASE_URL}/portfolio/backtest", json=portfolio_data)
+                else:
+                    return "<div style='color: red;'>❌ Invalid action type</div>"
                 
                 if response.status_code == 200:
-                    logger.info("Portfolio optimization completed successfully")
-                    return response.json()
+                    result = response.json()
+                    return format_portfolio_results(result, action_type)
                 else:
-                    logger.error(f"Portfolio optimization failed with status {response.status_code}")
-                    return {"error": f"API Error: {response.status_code}"}
+                    return f"<div style='color: red;'>❌ Error: {response.text}</div>"
                     
             except Exception as e:
-                logger.error(f"Portfolio optimization error: {e}")
-                return {"error": str(e)}
+                return f"<div style='color: red;'>❌ Error: {str(e)}</div>"
         
+        # Button click handlers
         simulate_btn.click(
-            fn=validate_and_simulate,
-            inputs=[symbols_input, start_date, end_date],
+            fn=lambda *args: validate_and_process(*args, "simulate"),
+            inputs=[symbols_input, start_date, end_date, strategy_dropdown, initial_capital, target_return, lookback_period],
+            outputs=portfolio_output
+        )
+        
+        optimize_btn.click(
+            fn=lambda *args: validate_and_process(*args, "optimize"),
+            inputs=[symbols_input, start_date, end_date, strategy_dropdown, initial_capital, target_return, lookback_period],
+            outputs=portfolio_output
+        )
+        
+        backtest_btn.click(
+            fn=lambda *args: validate_and_process(*args, "backtest"),
+            inputs=[symbols_input, start_date, end_date, strategy_dropdown, initial_capital, target_return, lookback_period],
             outputs=portfolio_output
         )
     
     return demo
 
+def format_portfolio_results(result: dict, action_type: str) -> str:
+    """Format portfolio results for display"""
+    try:
+        if action_type == "optimize":
+            return format_optimization_results(result)
+        else:
+            return format_simulation_backtest_results(result, action_type)
+    except Exception as e:
+        return f"<div style='color: red;'>❌ Error formatting results: {str(e)}</div>"
+
+def format_optimization_results(result: dict) -> str:
+    """Format optimization results with comprehensive analysis"""
+    if not result.get("optimization_complete", False):
+        return f"""
+        <div style='background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 10px 0;'>
+            <h3 style='color: #856404; margin-top: 0;'>⚠️ Optimization Failed</h3>
+            <p><strong>Error:</strong> {result.get('error', 'Unknown error occurred')}</p>
+            <p><strong>Fallback:</strong> {result.get('fallback_strategy', 'Equal Weight')}</p>
+        </div>
+        """
+    
+    best_strategy = result.get("best_strategy", {})
+    recommendation = result.get("recommendation", {})
+    all_results = result.get("all_results", [])
+    
+    # Helper functions for formatting
+    def format_currency(value):
+        return f"${value:,.2f}" if value is not None else "N/A"
+    
+    def format_percentage(value):
+        return f"{value*100:+.2f}%" if value is not None else "N/A"
+    
+    def format_ratio(value):
+        return f"{value:.3f}" if value is not None else "N/A"
+    
+    # Main results
+    html = f"""
+    <div style='background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 10px 0;'>
+        <h2 style='color: #2c3e50; margin-top: 0; border-bottom: 2px solid #3498db; padding-bottom: 10px;'>
+            🎯 Portfolio Optimization Results
+        </h2>
+        
+        <div style='background: #e8f5e8; border-left: 4px solid #27ae60; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #27ae60; margin-top: 0;'>🏆 Recommended Strategy</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+                <div><strong>Strategy:</strong> {best_strategy.get('strategy', 'N/A')}</div>
+                <div><strong>Parameters:</strong> {str(best_strategy.get('parameters', {})) if best_strategy.get('parameters') else 'Default'}</div>
+                <div><strong>Final Value:</strong> {format_currency(best_strategy.get('final_portfolio_value'))}</div>
+                <div><strong>Total Return:</strong> {format_percentage(best_strategy.get('total_return'))}</div>
+                <div><strong>Annual Return:</strong> {format_percentage(best_strategy.get('annual_return'))}</div>
+                <div><strong>Volatility:</strong> {format_percentage(best_strategy.get('volatility'))}</div>
+                <div><strong>Sharpe Ratio:</strong> {format_ratio(best_strategy.get('sharpe_ratio'))}</div>
+                <div><strong>Profit/Loss:</strong> {format_currency(best_strategy.get('total_return_dollars'))}</div>
+            </div>
+        </div>
+        
+        <div style='background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;'>
+            <h3 style='color: #495057; margin-top: 0;'>📊 Optimization Summary</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;'>
+                <div><strong>Strategies Tested:</strong> {result.get('strategies_tested', 0)}</div>
+                <div><strong>Improvement vs Equal Weight:</strong> {format_ratio(result.get('improvement_over_equal_weight', 0))}</div>
+            </div>
+        </div>
+        
+        <div style='background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #856404; margin-top: 0;'>💡 Portfolio Allocation</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;'>
+    """
+    
+    # Add weight breakdown
+    weights = best_strategy.get('weights', {})
+    for symbol, weight in weights.items():
+        html += f"<div><strong>{symbol}:</strong> {weight*100:.1f}%</div>"
+    
+    html += """
+            </div>
+        </div>
+    """
+    
+    # Add comparison table
+    if len(all_results) > 1:
+        html += """
+        <div style='margin: 20px 0;'>
+            <h3 style='color: #495057;'>📈 Strategy Comparison (Top 5)</h3>
+            <div style='overflow-x: auto;'>
+                <table style='width: 100%; border-collapse: collapse; background: white;'>
+                    <thead>
+                        <tr style='background: #f8f9fa;'>
+                            <th style='padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;'>Strategy</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Sharpe Ratio</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Annual Return</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Volatility</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Final Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+        
+        for i, strategy in enumerate(all_results[:5]):
+            row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
+            strategy_name = strategy.get('strategy', 'Unknown')
+            params = strategy.get('parameters', {})
+            if params:
+                strategy_display = f"{strategy_name} ({params})"
+            else:
+                strategy_display = strategy_name
+                
+            html += f"""
+                        <tr style='{row_style}'>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'>{strategy_display}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_ratio(strategy.get('sharpe_ratio'))}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_percentage(strategy.get('annual_return'))}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_percentage(strategy.get('volatility'))}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(strategy.get('final_portfolio_value'))}</td>
+                        </tr>
+            """
+        
+        html += """
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
+    
+    html += """
+        <div style='background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #0c5460; margin-top: 0;'>💬 Recommendation</h3>
+            <p style='margin: 0; font-size: 16px;'>{}</p>
+        </div>
+    </div>
+    """.format(result.get('message', 'Optimization completed successfully.'))
+    
+    return html
+
+def format_simulation_backtest_results(result: dict, action_type: str) -> str:
+    """Format simulation and backtest results"""
+    # Helper functions
+    def format_currency(value):
+        return f"${value:,.2f}" if value is not None else "N/A"
+    
+    def format_percentage(value):
+        return f"{value:+.2f}%" if value is not None else "N/A"
+    
+    def format_ratio(value):
+        return f"{value:.3f}" if value is not None else "N/A"
+    
+    action_title = "📈 Portfolio Simulation" if action_type == "simulate" else "📊 Portfolio Backtest"
+    analysis_type = "Projected" if action_type == "simulate" else "Actual"
+    
+    html = f"""
+    <div style='background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 10px 0;'>
+        <h2 style='color: #2c3e50; margin-top: 0; border-bottom: 2px solid #3498db; padding-bottom: 10px;'>
+            {action_title} Results
+        </h2>
+        
+        <div style='background: #e8f5e8; border-left: 4px solid #27ae60; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #27ae60; margin-top: 0;'>💰 Financial Summary</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+                <div><strong>Strategy:</strong> {result.get('strategy', 'N/A')}</div>
+                <div><strong>Initial Capital:</strong> {format_currency(result.get('initial_capital'))}</div>
+    """
+    
+    # Different fields for simulate vs backtest
+    if action_type == "simulate":
+        html += f"""
+                <div><strong>Projected Final Value:</strong> {format_currency(result.get('projected_final_value'))}</div>
+                <div><strong>Projected Return:</strong> {format_currency(result.get('projected_return_dollars'))}</div>
+                <div><strong>Projected Return %:</strong> {format_percentage(result.get('projected_return_percent'))}</div>
+        """
+    else:
+        html += f"""
+                <div><strong>Final Portfolio Value:</strong> {format_currency(result.get('final_portfolio_value'))}</div>
+                <div><strong>Total Return:</strong> {format_currency(result.get('total_return_dollars'))}</div>
+                <div><strong>Total Return %:</strong> {format_percentage(result.get('total_return_percent'))}</div>
+        """
+    
+    html += """
+            </div>
+        </div>
+        
+        <div style='background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;'>
+            <h3 style='color: #495057; margin-top: 0;'>📊 Risk Metrics</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+    """
+    
+    # Risk metrics
+    if action_type == "simulate":
+        html += f"""
+                <div><strong>Expected Annual Return:</strong> {format_percentage(result.get('expected_annual_return'))}</div>
+                <div><strong>Volatility:</strong> {format_percentage(result.get('volatility'))}</div>
+                <div><strong>Sharpe Ratio:</strong> {format_ratio(result.get('sharpe_ratio'))}</div>
+        """
+    else:
+        html += f"""
+                <div><strong>Annual Return:</strong> {format_percentage(result.get('annual_return'))}</div>
+                <div><strong>Volatility:</strong> {format_percentage(result.get('volatility'))}</div>
+                <div><strong>Sharpe Ratio:</strong> {format_ratio(result.get('sharpe_ratio'))}</div>
+        """
+    
+    html += """
+            </div>
+        </div>
+        
+        <div style='background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #856404; margin-top: 0;'>💡 Portfolio Allocation</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;'>
+    """
+    
+    # Portfolio weights
+    weights = result.get('weights', {})
+    allocation_amounts = result.get('allocation_amounts', {})
+    
+    for symbol in weights.keys():
+        weight = weights.get(symbol, 0)
+        amount = allocation_amounts.get(symbol, 0)
+        html += f"<div><strong>{symbol}:</strong> {weight*100:.1f}% ({format_currency(amount)})</div>"
+    
+    html += """
+            </div>
+        </div>
+    """
+    
+    # Individual asset performance
+    final_asset_values = result.get('final_asset_values', {})
+    if final_asset_values:
+        html += f"""
+        <div style='margin: 20px 0;'>
+            <h3 style='color: #495057;'>📈 Individual Asset Performance</h3>
+            <div style='overflow-x: auto;'>
+                <table style='width: 100%; border-collapse: collapse; background: white;'>
+                    <thead>
+                        <tr style='background: #f8f9fa;'>
+                            <th style='padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;'>Asset</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Initial Allocation</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>{analysis_type} Final Value</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Individual Return</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+        
+        for i, symbol in enumerate(final_asset_values.keys()):
+            row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
+            initial_amount = allocation_amounts.get(symbol, 0)
+            final_amount = final_asset_values.get(symbol, 0)
+            individual_return = ((final_amount - initial_amount) / initial_amount * 100) if initial_amount > 0 else 0
+            
+            html += f"""
+                        <tr style='{row_style}'>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'><strong>{symbol}</strong></td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(initial_amount)}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(final_amount)}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{individual_return:+.2f}%</td>
+                        </tr>
+            """
+        
+        html += """
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
+    
+    html += f"""
+        <div style='background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #0c5460; margin-top: 0;'>💬 Analysis Complete</h3>
+            <p style='margin: 0; font-size: 16px;'>{result.get('message', f'{action_title} completed successfully.')}</p>
+        </div>
+    </div>
+    """
+    
+    return html
+
 # Risk Interface
 def risk_interface():
-    with gr.Blocks(title="Risk Management") as demo:
+    with gr.Blocks(title="Risk Management", css="""
+        #risk-results {
+            min-height: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #fafafa;
+        }
+        """) as demo:
         gr.Markdown("# ⚠️ Risk Management")
         
         with gr.Row():
             with gr.Column(scale=1):
+                gr.Markdown("### 📋 Risk Analysis Configuration")
+                
                 symbols_input = gr.Textbox(
                     label="Stock Symbols (comma-separated)",
-                    placeholder="e.g., AAPL,GOOGL,MSFT",
+                    placeholder="AAPL,GOOGL,MSFT,AMZN",
                     value="AAPL,GOOGL,MSFT"
                 )
                 
-                start_date = gr.Textbox(
-                    label="Start Date (YYYY-MM-DD)",
-                    value=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-                )
+                with gr.Row():
+                    start_date = gr.Textbox(
+                        label="Start Date (YYYY-MM-DD)",
+                        value=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+                    )
+                    end_date = gr.Textbox(
+                        label="End Date (YYYY-MM-DD)",
+                        value=datetime.now().strftime("%Y-%m-%d")
+                    )
                 
-                end_date = gr.Textbox(
-                    label="End Date (YYYY-MM-DD)",
-                    value=datetime.now().strftime("%Y-%m-%d")
-                )
+                with gr.Row():
+                    confidence_level = gr.Slider(
+                        label="Confidence Level",
+                        minimum=0.90,
+                        maximum=0.99,
+                        value=0.95,
+                        step=0.01
+                    )
+                    portfolio_value = gr.Number(
+                        label="Portfolio Value ($)",
+                        value=1000000,
+                        minimum=10000
+                    )
                 
-                confidence_level = gr.Slider(
-                    label="Confidence Level",
-                    minimum=0.90,
-                    maximum=0.99,
-                    value=0.95,
-                    step=0.01
-                )
-                
-                analyze_btn = gr.Button("Analyze Risk", variant="primary")
+                # Help Text
+                with gr.Accordion("ℹ️ Risk Analysis Types", open=False):
+                    gr.Markdown("""
+                    **Single Asset**: Individual risk metrics, stress testing, VaR breakdown
+                    
+                    **Portfolio**: Correlation analysis, component VaR, diversification metrics
+                    
+                    **Stress Testing**: Market crash scenarios, volatility spikes, correlation breakdown
+                    """)
             
             with gr.Column(scale=2):
-                risk_output = gr.JSON(label="Risk Analysis Results")
+                gr.Markdown("### 🚀 Risk Analysis")
+                
+                analyze_btn = gr.Button("📊 Analyze Risk", variant="primary", size="lg")
+                
+                # Results Display
+                risk_output = gr.HTML(
+                    value="<div style='text-align: center; padding: 50px; color: #666;'>⚠️ Configure your analysis and click 'Analyze Risk' to get started</div>",
+                    elem_id="risk-results"
+                )
         
-        def validate_and_analyze_risk(symbols_str, start_date, end_date, confidence_level):
+        def validate_and_analyze_risk_enhanced(symbols_str, start_date, end_date, confidence_level, portfolio_value):
+            """Enhanced risk analysis with better formatting"""
             logger.info(f"Running risk analysis for symbols: {symbols_str}")
-            symbols = [s.strip().upper() for s in symbols_str.split(",")]
+            symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
             invalid_symbols = [s for s in symbols if not is_valid_symbol(s)]
             
             if invalid_symbols:
-                return {"error": f"Invalid symbols: {', '.join(invalid_symbols)}"}
+                return f"<div style='color: red;'>❌ Invalid symbols: {', '.join(invalid_symbols)}</div>"
             
             try:
-                risk_data = {
-                    "symbols": symbols,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "confidence_level": confidence_level
-                }
+                # Prepare data for both single and multiple symbols
+                if len(symbols) == 1:
+                    risk_data = {
+                        "symbol": symbols[0],
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "confidence_level": confidence_level,
+                        "portfolio_value": portfolio_value
+                    }
+                else:
+                    risk_data = {
+                        "symbols": symbols,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "confidence_level": confidence_level,
+                        "portfolio_value": portfolio_value
+                    }
                 
-                logger.info(f"Sending risk analysis request")
-                response = requests.post(
-                    f"{API_BASE_URL}/risk/analyze",
-                    json=risk_data
-                )
+                response = requests.post(f"{API_BASE_URL}/risk/analyze", json=risk_data)
                 
                 if response.status_code == 200:
-                    logger.info("Risk analysis completed successfully")
-                    return response.json()
+                    result = response.json()
+                    return format_risk_results(result)
                 else:
-                    logger.error(f"Risk analysis failed with status {response.status_code}")
-                    return {"error": f"API Error: {response.status_code}"}
+                    return f"<div style='color: red;'>❌ API Error: {response.status_code}</div>"
                     
             except Exception as e:
-                logger.error(f"Risk analysis error: {e}")
-                return {"error": str(e)}
+                return f"<div style='color: red;'>❌ Error: {str(e)}</div>"
         
+        # Update the click handler to include portfolio_value
         analyze_btn.click(
-            fn=validate_and_analyze_risk,
-            inputs=[symbols_input, start_date, end_date, confidence_level],
+            fn=validate_and_analyze_risk_enhanced,
+            inputs=[symbols_input, start_date, end_date, confidence_level, portfolio_value],
             outputs=risk_output
         )
     
     return demo
+
+def format_risk_results(result: dict) -> str:
+    """Format risk analysis results for display"""
+    if result.get("analysis_type") == "Portfolio Risk Analysis":
+        return format_portfolio_risk_results(result)
+    else:
+        return format_single_asset_risk_results(result)
+
+def format_portfolio_risk_results(result: dict) -> str:
+    """Format portfolio risk analysis results"""
+    # Helper functions
+    def format_currency(value):
+        return f"${value:,.2f}" if value is not None else "N/A"
+    
+    def format_percentage(value):
+        return f"{value:+.2f}%" if value is not None else "N/A"
+    
+    def format_ratio(value):
+        return f"{value:.3f}" if value is not None else "N/A"
+    
+    symbols = result.get("symbols", [])
+    portfolio_metrics = result.get("portfolio_metrics", {})
+    component_analysis = result.get("component_analysis", {})
+    correlation_analysis = result.get("correlation_analysis", {})
+    stress_testing = result.get("stress_testing", {})
+    individual_metrics = result.get("individual_metrics", {})
+    
+    html = f"""
+    <div style='background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 10px 0;'>
+        <h2 style='color: #2c3e50; margin-top: 0; border-bottom: 2px solid #e74c3c; padding-bottom: 10px;'>
+            ⚠️ Portfolio Risk Analysis Results
+        </h2>
+        
+        <div style='background: #ffeaa7; border-left: 4px solid #fdcb6e; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #e17055; margin-top: 0;'>📊 Portfolio Risk Metrics</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+                <div><strong>Portfolio VaR (95%):</strong> {format_currency(portfolio_metrics.get('portfolio_var_95'))}</div>
+                <div><strong>Portfolio Volatility:</strong> {format_percentage(portfolio_metrics.get('portfolio_volatility', 0) * 100)}</div>
+                <div><strong>Diversification Ratio:</strong> {format_ratio(portfolio_metrics.get('diversification_ratio'))}</div>
+                <div><strong>Assets Analyzed:</strong> {len(symbols)}</div>
+            </div>
+        </div>
+        
+        <div style='background: #fab1a0; border-left: 4px solid #e17055; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #d63031; margin-top: 0;'>🎯 Risk Contribution Analysis</h3>
+            <div style='overflow-x: auto;'>
+                <table style='width: 100%; border-collapse: collapse; background: white;'>
+                    <thead>
+                        <tr style='background: #f8f9fa;'>
+                            <th style='padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;'>Asset</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Component VaR</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Risk Contribution %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    """
+    
+    # Add component VaR breakdown
+    component_var = component_analysis.get('component_var', {})
+    risk_contribution = component_analysis.get('risk_contribution_pct', {})
+    
+    for i, symbol in enumerate(symbols):
+        row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
+        comp_var = component_var.get(symbol, 0)
+        risk_contrib = risk_contribution.get(symbol, 0)
+        
+        html += f"""
+                        <tr style='{row_style}'>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'><strong>{symbol}</strong></td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(comp_var)}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{risk_contrib:.1f}%</td>
+                        </tr>
+        """
+    
+    html += """
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div style='background: #fd79a8; border-left: 4px solid #e84393; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #d63031; margin-top: 0;'>🔗 Correlation Analysis</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+                <div><strong>Average Correlation:</strong> {format_ratio(correlation_analysis.get('average_correlation'))}</div>
+            </div>
+        </div>
+        
+        <div style='background: #ff7675; border-left: 4px solid #d63031; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #2d3436; margin-top: 0;'>🚨 Stress Testing Results</h3>
+            <div style='overflow-x: auto;'>
+                <table style='width: 100%; border-collapse: collapse; background: white;'>
+                    <thead>
+                        <tr style='background: #f8f9fa;'>
+                            <th style='padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;'>Scenario</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Description</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Loss %</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Loss $</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    """
+    
+    # Add stress test results
+    for i, (scenario, data) in enumerate(stress_testing.items()):
+        row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
+        scenario_name = scenario.replace('_', ' ').title()
+        
+        html += f"""
+                        <tr style='{row_style}'>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'><strong>{scenario_name}</strong></td>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'>{data.get('description', 'N/A')}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{data.get('portfolio_loss_pct', 0):.2f}%</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(data.get('portfolio_loss_dollar', 0))}</td>
+                        </tr>
+        """
+    
+    html += f"""
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div style='background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #0c5460; margin-top: 0;'>💬 Analysis Summary</h3>
+            <p style='margin: 0; font-size: 16px;'>{result.get('message', 'Portfolio risk analysis completed successfully.')}</p>
+        </div>
+    </div>
+    """
+    
+    return html
+
+def format_single_asset_risk_results(result: dict) -> str:
+    """Format single asset risk analysis results"""
+    # Helper functions
+    def format_currency(value):
+        return f"${value:,.2f}" if value is not None else "N/A"
+    
+    def format_percentage(value):
+        return f"{value:+.2f}%" if value is not None else "N/A"
+    
+    def format_ratio(value):
+        return f"{value:.3f}" if value is not None else "N/A"
+    
+    symbol = result.get("symbol", "N/A")
+    risk_metrics = result.get("risk_metrics", {})
+    var_breakdown = result.get("var_breakdown", {})
+    stress_testing = result.get("stress_testing", {})
+    
+    html = f"""
+    <div style='background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin: 10px 0;'>
+        <h2 style='color: #2c3e50; margin-top: 0; border-bottom: 2px solid #e74c3c; padding-bottom: 10px;'>
+            ⚠️ Single Asset Risk Analysis: {symbol}
+        </h2>
+        
+        <div style='background: #ffeaa7; border-left: 4px solid #fdcb6e; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #e17055; margin-top: 0;'>📊 Core Risk Metrics</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;'>
+                <div><strong>VaR (95%):</strong> {format_percentage(risk_metrics.get('var_95_pct', 0))}</div>
+                <div><strong>VaR Dollar Amount:</strong> {format_currency(risk_metrics.get('var_95_dollar'))}</div>
+                <div><strong>Expected Shortfall:</strong> {format_currency(risk_metrics.get('expected_shortfall_95'))}</div>
+                <div><strong>Annual Volatility:</strong> {format_percentage(risk_metrics.get('volatility_annual', 0) * 100)}</div>
+                <div><strong>Max Drawdown:</strong> {format_percentage(risk_metrics.get('max_drawdown', 0) * 100)}</div>
+            </div>
+        </div>
+        
+        <div style='background: #fab1a0; border-left: 4px solid #e17055; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #d63031; margin-top: 0;'>📅 VaR Time Breakdown</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;'>
+                <div><strong>Daily VaR:</strong> {format_percentage(var_breakdown.get('daily_var_95', 0))}</div>
+                <div><strong>Weekly VaR:</strong> {format_percentage(var_breakdown.get('weekly_var_95', 0))}</div>
+                <div><strong>Monthly VaR:</strong> {format_percentage(var_breakdown.get('monthly_var_95', 0))}</div>
+            </div>
+        </div>
+        
+        <div style='background: #ff7675; border-left: 4px solid #d63031; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #2d3436; margin-top: 0;'>🚨 Stress Testing Results</h3>
+            <div style='overflow-x: auto;'>
+                <table style='width: 100%; border-collapse: collapse; background: white;'>
+                    <thead>
+                        <tr style='background: #f8f9fa;'>
+                            <th style='padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6;'>Scenario</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Description</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Loss %</th>
+                            <th style='padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6;'>Loss $</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    """
+    
+    # Add stress test results
+    for i, (scenario, data) in enumerate(stress_testing.items()):
+        row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
+        scenario_name = scenario.replace('_', ' ').title()
+        
+        if 'loss_pct' in data:
+            loss_pct = data.get('loss_pct', 0)
+            loss_dollar = data.get('loss_dollar', 0)
+        else:
+            loss_pct = data.get('stressed_var_pct', 0)
+            loss_dollar = data.get('stressed_var_dollar', 0)
+        
+        html += f"""
+                        <tr style='{row_style}'>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'><strong>{scenario_name}</strong></td>
+                            <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'>{data.get('description', 'N/A')}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{loss_pct:.2f}%</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(loss_dollar)}</td>
+                        </tr>
+        """
+    
+    html += f"""
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div style='background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0; border-radius: 4px;'>
+            <h3 style='color: #0c5460; margin-top: 0;'>💬 Analysis Summary</h3>
+            <p style='margin: 0; font-size: 16px;'>{result.get('message', 'Single asset risk analysis completed successfully.')}</p>
+        </div>
+    </div>
+    """
+    
+    return html
 
 # Main application
 def create_app():

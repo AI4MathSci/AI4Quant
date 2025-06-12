@@ -121,3 +121,111 @@ class PortfolioModel(BaseModel):
             "sharpe_ratio": round(sharpe_ratio, 4),
             "message": f"Portfolio backtesting successful using {self.strategy}."
         }
+
+    async def optimize(self) -> Dict[str, Any]:
+        """
+        Optimizes portfolio parameters by testing different strategies and configurations.
+        Finds the best strategy based on risk-adjusted returns (Sharpe ratio).
+
+        Returns:
+            Dict[str, Any]: Optimization results with best strategy and performance comparison.
+        """
+        prices = yf.download(self.asset_symbols, start=self.start_date, end=self.end_date, progress=False)["Close"]
+        
+        # Define strategies and their parameter ranges to test
+        strategies_to_test = [
+            {"strategy": "Equal Weight", "params": {}},
+            {"strategy": "Mean Variance Optimization", "params": {"target_return": 0.08}},
+            {"strategy": "Mean Variance Optimization", "params": {"target_return": 0.12}},
+            {"strategy": "Mean Variance Optimization", "params": {"target_return": 0.16}},
+            {"strategy": "Momentum", "params": {"lookback_period": 126}},  # 6 months
+            {"strategy": "Momentum", "params": {"lookback_period": 252}},  # 1 year
+            {"strategy": "Momentum", "params": {"lookback_period": 504}},  # 2 years
+        ]
+        
+        optimization_results = []
+        
+        for strategy_config in strategies_to_test:
+            try:
+                strategy_name = strategy_config["strategy"]
+                strategy_params = strategy_config["params"]
+                
+                # Get strategy-specific parameters
+                target_return = strategy_params.get("target_return", self.target_return)
+                lookback_period = strategy_params.get("lookback_period", self.lookback_period)
+                
+                # Calculate weights for this strategy configuration
+                weights = get_portfolio_strategy(strategy_name, {
+                    "prices": prices,
+                    "target_return": target_return,
+                    "lookback_period": lookback_period,
+                    "asset_symbols": self.asset_symbols,
+                })
+                
+                # Calculate performance metrics
+                returns = prices.pct_change().dropna()
+                portfolio_returns = (returns * list(weights.values())).sum(axis=1)
+                
+                # Performance calculations
+                total_return = (1 + portfolio_returns).prod() - 1
+                annual_return = portfolio_returns.mean() * 252
+                volatility = portfolio_returns.std() * (252 ** 0.5)
+                sharpe_ratio = annual_return / volatility if volatility > 0 else 0
+                
+                # Portfolio values
+                final_portfolio_value = self.initial_capital * (1 + total_return)
+                total_return_dollars = final_portfolio_value - self.initial_capital
+                
+                # Store results
+                result = {
+                    "strategy": strategy_name,
+                    "parameters": strategy_params,
+                    "weights": {symbol: round(weight, 4) for symbol, weight in weights.items()},
+                    "final_portfolio_value": round(final_portfolio_value, 2),
+                    "total_return_dollars": round(total_return_dollars, 2),
+                    "total_return": round(total_return, 4),
+                    "annual_return": round(annual_return, 4),
+                    "volatility": round(volatility, 4),
+                    "sharpe_ratio": round(sharpe_ratio, 4),
+                }
+                optimization_results.append(result)
+                
+            except Exception as e:
+                print(f"Error testing {strategy_config}: {e}")
+                continue
+        
+        # Find best strategy based on Sharpe ratio
+        if optimization_results:
+            best_strategy = max(optimization_results, key=lambda x: x["sharpe_ratio"])
+            
+            # Calculate improvement vs equal weight baseline
+            equal_weight_result = next((r for r in optimization_results if r["strategy"] == "Equal Weight"), None)
+            improvement = 0
+            if equal_weight_result:
+                improvement = best_strategy["sharpe_ratio"] - equal_weight_result["sharpe_ratio"]
+            
+            return {
+                "methodology": "Portfolio Optimization",
+                "optimization_complete": True,
+                "strategies_tested": len(optimization_results),
+                "best_strategy": best_strategy,
+                "improvement_over_equal_weight": round(improvement, 4),
+                "all_results": sorted(optimization_results, key=lambda x: x["sharpe_ratio"], reverse=True),
+                "recommendation": {
+                    "strategy": best_strategy["strategy"],
+                    "parameters": best_strategy["parameters"],
+                    "expected_return": best_strategy["annual_return"],
+                    "risk": best_strategy["volatility"],
+                    "sharpe_ratio": best_strategy["sharpe_ratio"],
+                },
+                "message": f"Optimization complete. Best strategy: {best_strategy['strategy']} with Sharpe ratio of {best_strategy['sharpe_ratio']:.4f}"
+            }
+        else:
+            # Fallback if optimization fails
+            return {
+                "methodology": "Portfolio Optimization",
+                "optimization_complete": False,
+                "error": "Unable to optimize portfolio - insufficient data or calculation errors",
+                "fallback_strategy": "Equal Weight",
+                "message": "Optimization failed. Using equal weight allocation as fallback."
+            }
