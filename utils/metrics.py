@@ -33,3 +33,24 @@ def calculate_win_loss_ratio(signals: pd.Series, returns: pd.Series) -> float:
         return float('inf')
     return wins / losses
 
+import numpy as np
+import pandas as pd
+
+def calculate_cumulative_returns(returns: pd.Series) -> pd.Series:
+    return (1 + returns).cumprod()
+
+def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate=0.0) -> float:
+    excess_returns = returns - risk_free_rate
+    return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+
+def calculate_max_drawdown(cumulative_returns: pd.Series) -> float:
+    peak = cumulative_returns.cummax()
+    drawdown = (cumulative_returns - peak) / peak
+    return drawdown.min()
+
+def calculate_win_loss_ratio(signals: pd.Series, returns: pd.Series) -> float:
+    applied_returns = signals.shift(1).fillna(0) * returns
+    wins = applied_returns[applied_returns > 0].count()
+    losses = applied_returns[applied_returns < 0].count()
+    return wins / losses if losses > 0 else float('inf')
+
