@@ -85,6 +85,33 @@ def trading_interface():
         #trading-results table {
             font-size: 14px;
         }
+        #simulation-summary, #simulation-performance {
+            min-height: 300px !important;
+            max-height: 500px !important;
+            overflow-y: auto !important;
+            padding: 15px !important;
+            border: 1px solid #e0e0e0 !important;
+            border-radius: 8px !important;
+            background-color: #fafafa !important;
+        }
+        .simulation-display {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+            line-height: 1.6 !important;
+        }
+        .simulation-display h4 {
+            color: #2563eb !important;
+            margin-top: 20px !important;
+            margin-bottom: 10px !important;
+        }
+        .sentiment-warning {
+            background-color: #fff3cd !important;
+            border: 1px solid #ffeaa7 !important;
+            border-radius: 8px !important;
+            padding: 10px !important;
+            margin: 10px 0 !important;
+            color: #856404 !important;
+            font-weight: 500 !important;
+        }
         """) as demo:
         gr.Markdown("# 📈 Trading Strategy Simulator")
         
@@ -219,14 +246,50 @@ def trading_interface():
                     include_risk_analysis = gr.Checkbox(
                         label="Include Risk Factor Analysis",
                         value=False,
-                        info="Analyze company-specific, industry, and market risks"
+                        info="Analyze company-specific, industry, and market risks (must enable sentiment analysis first)"
                     )
                     
                     include_catalyst_analysis = gr.Checkbox(
                         label="Include Catalyst Analysis",
                         value=False,
-                        info="Identify potential positive and negative price catalysts"
+                        info="Identify potential positive and negative price catalysts (must enable sentiment analysis first)"
                     )
+                    
+                    # Warning message for sentiment dependencies
+                    sentiment_warning = gr.Markdown(
+                        value="",
+                        elem_classes=["sentiment-warning"],
+                        visible=False
+                    )
+                    
+                    # Sentiment API Call Controls
+                    with gr.Row():
+                        sentiment_api_frequency = gr.Slider(
+                            label="Sentiment API Frequency",
+                            minimum=1,
+                            maximum=60,
+                            value=60,
+                            step=1,
+                            info="Call sentiment API every N trading days (higher = fewer API calls, lower cost)"
+                        )
+                        
+                        sentiment_decay_factor = gr.Slider(
+                            label="Sentiment Decay Factor",
+                            minimum=0.7,
+                            maximum=0.99,
+                            value=0.9,
+                            step=0.01,
+                            info="How quickly sentiment decays between API calls (0.9 = 10% decay per day)"
+                        )
+                        
+                        sentiment_combo_weight = gr.Slider(
+                            label="Sentiment Combo Weight",
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.5,
+                            step=0.1,
+                            info="Weight for combining decayed API sentiment with keyword sentiment (0.5 = equal weight)"
+                        )
                 
                 # Optimization Controls
                 with gr.Accordion("Backtesting Optimization", open=False, elem_classes=["optimization-controls"], elem_id="optimization-section"):
@@ -260,7 +323,7 @@ def trading_interface():
                     
                     max_combinations = gr.Number(
                         label="Max Parameter Combinations",
-                        value=200,
+                        value=400,
                         minimum=50,
                         maximum=1000,
                         info="Upper limit for parameter testing (limits compute time)"
@@ -269,7 +332,61 @@ def trading_interface():
             with gr.Column(scale=2):
                 with gr.Tab("Simulation"):
                     simulate_btn = gr.Button("Run Simulation", variant="primary")
-                    simulation_output = gr.JSON(label="Simulation Results")
+                    
+                    # Enhanced results display
+                    with gr.Row():
+                        with gr.Column():
+                            gr.Markdown("### 📈 **Simulation Results**")
+                            simulation_summary = gr.Markdown(
+                                value="""
+**Ready to simulate...**
+
+• Click "Run Simulation" to start forward-looking analysis
+• System will project performance using current parameters
+• Results will show projected portfolio value and returns
+
+*Simulation results will appear here...*
+                                """, 
+                                elem_id="simulation-summary",
+                                elem_classes=["simulation-display"]
+                            )
+                        
+                        with gr.Column():
+                            gr.Markdown("### 📊 **Performance Projection**")
+                            simulation_performance = gr.Markdown(
+                                value="""
+**Performance projection will appear here...**
+
+**Projected Results:**
+• Final Portfolio Value: *pending*
+• Total Return: *pending*
+• Annualized Return: *pending*
+
+**Configuration:**
+• Strategy: *current settings*
+• Sentiment Analysis: *enabled/disabled*
+
+*Detailed projection analysis will be shown after simulation completes...*
+                                """,
+                                elem_id="simulation-performance", 
+                                elem_classes=["simulation-display"]
+                            )
+                    
+                    with gr.Row():
+                        gr.Markdown("### 📋 **Detailed Results** (Advanced)")
+                        simulation_output = gr.JSON(label="Complete Analysis", visible=False)
+                    
+                    # Toggle for detailed results
+                    show_simulation_detailed = gr.Checkbox(label="Show Detailed JSON Results", value=False)
+                    
+                    def toggle_simulation_detailed_results(show):
+                        return gr.update(visible=show)
+                    
+                    show_simulation_detailed.change(
+                        fn=toggle_simulation_detailed_results,
+                        inputs=[show_simulation_detailed],
+                        outputs=[simulation_output]
+                    )
                 
                 with gr.Tab("Backtesting"):
                     backtest_btn = gr.Button("Run Backtest", variant="primary")
@@ -410,7 +527,7 @@ Please review the error message and adjust your settings accordingly.
 **Total Return:** {return_pct:+.2f}%
 
 **Analysis Mode:** Single parameter set (no optimization)
-**Sentiment Analysis:** {'Enabled' if result.get('sentiment_analysis', {}).get('enabled', False) else 'Disabled'}
+**Sentiment Analysis:** {'Enabled' if use_sentiment else 'Disabled'}
 """
                 
                 performance_text = f"""
@@ -424,12 +541,12 @@ Please review the error message and adjust your settings accordingly.
 #### ⚙️ **Configuration Used**
 **Parameters:** Current UI settings  
 **Time Period:** {result.get('start_date', 'N/A')} to {result.get('end_date', 'N/A')}
-**Sentiment Weight:** {result.get('sentiment_weight', 'N/A') if result.get('sentiment_analysis', {}).get('enabled', False) else 'N/A (Disabled)'}
+**Sentiment Weight:** {result.get('sentiment_weight', 'N/A') if use_sentiment else 'N/A (Disabled)'}
 
 #### 📋 **Analysis Notes**
 • This was a single-run backtest with your current parameter settings
 • For optimized parameters, enable "Parameter Optimization" 
-• Results show performance using {'sentiment-enhanced' if result.get('sentiment_analysis', {}).get('enabled', False) else 'technical-only'} approach
+• Results show performance using {'sentiment-enhanced' if use_sentiment else 'technical-only'} approach
 
 **Status:** {result.get('message', 'Analysis completed')}
 """
@@ -560,10 +677,120 @@ Please review the error message and adjust your settings accordingly.
             
             return optimization_text, performance_text, result
 
+        def format_simulation_results(result):
+            """Format simulation results for enhanced display"""
+            if "error" in result:
+                return (
+                    f"""
+#### ❌ **Error Occurred**
+
+**Error Message:** {result['error']}
+
+**Troubleshooting:**
+• Check if the stock symbol is valid
+• Verify date ranges are correct  
+• Ensure API services are running
+• Try again with different parameters
+
+*Please check your inputs and try again.*
+                    """,
+                    """
+**Unable to complete simulation due to error.**
+
+Please review the error message and adjust your settings accordingly.
+                    """,
+                    result
+                )
+            
+            # Extract simulation data
+            initial_capital = result.get('initial_capital', 100000)
+            final_value = result.get('final_portfolio_value', initial_capital)
+            profit_loss = final_value - initial_capital
+            
+            # Fix return calculation - try multiple field names
+            return_pct = result.get('total_return_pct', 
+                          result.get('return_pct', 
+                          result.get('total_return', 
+                          result.get('return', 0))))
+            
+            # If still 0, calculate manually
+            if return_pct == 0 and final_value != initial_capital:
+                return_pct = ((final_value - initial_capital) / initial_capital) * 100
+            
+            # Additional metrics
+            annualized_return = result.get('annualized_return', return_pct)
+            sharpe_ratio = result.get('sharpe_ratio', 0.0)
+            max_drawdown = result.get('max_drawdown', 0.0)
+            
+            # Get dates - try multiple sources
+            start_date_display = (result.get('start_date') or 
+                                 result.get('period_start') or 
+                                 result.get('simulation_start', 'N/A'))
+            end_date_display = (result.get('end_date') or 
+                               result.get('period_end') or 
+                               result.get('simulation_end', 'N/A'))
+            
+            # Get sentiment status from result (which now contains UI parameters)
+            use_sentiment = result.get('use_sentiment', False)
+            sentiment_weight = result.get('sentiment_weight', 0.0)
+            
+            # Left column: Financial results and performance metrics
+            simulation_text = f"""
+#### 💰 **Financial Results**
+
+**Initial Capital:** ${initial_capital:,.2f}
+
+**Final Portfolio Value:** ${final_value:,.2f}
+
+**Profit/Loss:** ${profit_loss:+,.2f}
+
+**Total Return:** {return_pct:+.2f}%
+
+---
+
+#### 📈 **Performance Metrics**
+
+**Annualized Return:** {annualized_return:+.2f}%
+
+**Sharpe Ratio:** {sharpe_ratio:.3f}
+
+**Max Drawdown:** {max_drawdown:+.2f}%
+"""
+            
+            # Right column: Configuration and analysis notes
+            performance_text = f"""
+#### ⚙️ **Configuration Used**
+
+**Strategy:** {result.get('strategy', 'N/A')}
+
+**Time Period:** {start_date_display} to {end_date_display}
+
+**Sentiment Analysis:** {'Enabled' if use_sentiment else 'Disabled'}
+
+**Sentiment Weight:** {f"{sentiment_weight*100:.0f}%" if use_sentiment else 'N/A (Disabled)'}
+
+---
+
+#### 📋 **Analysis Notes**
+
+• Forward-looking projection using current parameters
+
+• Based on historical patterns and market conditions
+
+• Actual results may vary due to market volatility
+
+• For historical analysis, use the Backtesting tab
+
+**Status:** {result.get('message', 'Simulation completed')}
+"""
+            
+            return simulation_text, performance_text, result
+
         def validate_and_simulate(symbol, start_date, end_date, initial_capital, strategy, 
                                 sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                                 bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
-                                analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis):
+                                analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
+                                sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight):
             logger.info(f"Running simulation for {symbol} with strategy {strategy}")
             if not is_valid_symbol(symbol):
                 return {"error": "Invalid stock symbol"}
@@ -587,7 +814,11 @@ Please review the error message and adjust your settings accordingly.
                     "analysis_scope": analysis_scope,
                     "sentiment_confidence_threshold": sentiment_confidence_threshold,
                     "include_risk_analysis": include_risk_analysis,
-                    "include_catalyst_analysis": include_catalyst_analysis
+                    "include_catalyst_analysis": include_catalyst_analysis,
+                    # Sentiment API call parameters
+                    "sentiment_api_frequency": sentiment_api_frequency,
+                    "sentiment_decay_factor": sentiment_decay_factor,
+                    "sentiment_combo_weight": sentiment_combo_weight
                 }
                 
                 logger.info(f"Sending simulation request to {API_BASE_URL}/trading/simulate/{symbol}")
@@ -598,10 +829,17 @@ Please review the error message and adjust your settings accordingly.
                 
                 if response.status_code == 200:
                     logger.info("Simulation completed successfully")
-                    return response.json()
+                    result = response.json()
+                    # Add the input dates and sentiment parameters to the result for proper display
+                    result['start_date'] = start_date
+                    result['end_date'] = end_date
+                    result['use_sentiment'] = use_sentiment
+                    result['sentiment_weight'] = sentiment_weight
+                    return format_simulation_results(result)
                 else:
                     logger.error(f"Simulation failed with status {response.status_code}")
-                    return {"error": f"API Error: {response.status_code}"}
+                    error_result = {"error": f"API Error: {response.status_code}"}
+                    return format_simulation_results(error_result)
                     
             except Exception as e:
                 logger.error(f"Simulation error: {e}")
@@ -611,6 +849,7 @@ Please review the error message and adjust your settings accordingly.
                                 sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                                 bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                                 analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
+                                sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
                                 enable_optimization, optimization_split_ratio, compare_sentiment_versions, 
                                 optimization_speed, max_combinations):
             logger.info(f"Running backtest for {symbol} with strategy {strategy}")
@@ -664,6 +903,10 @@ Please review the error message and adjust your settings accordingly.
                     "sentiment_confidence_threshold": sentiment_confidence_threshold,
                     "include_risk_analysis": include_risk_analysis,
                     "include_catalyst_analysis": include_catalyst_analysis,
+                    # Sentiment API call parameters
+                    "sentiment_api_frequency": sentiment_api_frequency,
+                    "sentiment_decay_factor": sentiment_decay_factor,
+                    "sentiment_combo_weight": sentiment_combo_weight,
                     # Optimization parameters
                     "enable_optimization": enable_optimization,
                     "optimization_split_ratio": optimization_split_ratio,
@@ -695,6 +938,47 @@ Please review the error message and adjust your settings accordingly.
         def refresh_api_status():
             return format_api_status(get_api_key_status())
         
+        def handle_sentiment_toggle(use_sentiment):
+            """Handle sentiment analysis toggle - disable dependent controls when disabled"""
+            if not use_sentiment:
+                # Disable and uncheck dependent controls
+                return (
+                    gr.update(value=False, interactive=False),  # include_risk_analysis
+                    gr.update(value=False, interactive=False),  # include_catalyst_analysis
+                    gr.update(value="⚠️ **Sentiment Analysis Disabled**\n\nRisk Factor Analysis and Catalyst Analysis require sentiment analysis to be enabled.\n\nPlease enable sentiment analysis first to use these features.", visible=True)  # warning
+                )
+            else:
+                # Enable dependent controls
+                return (
+                    gr.update(interactive=True),  # include_risk_analysis
+                    gr.update(interactive=True),  # include_catalyst_analysis
+                    gr.update(visible=False)  # warning
+                )
+        
+        def handle_risk_analysis_attempt(include_risk, use_sentiment):
+            """Handle attempt to check risk analysis without sentiment enabled"""
+            if include_risk and not use_sentiment:
+                return (
+                    gr.update(value=False),  # uncheck risk analysis
+                    gr.update(value="⚠️ **Cannot Enable Risk Factor Analysis**\n\nRisk Factor Analysis requires sentiment analysis to be enabled.\n\nPlease enable sentiment analysis first.", visible=True)  # warning
+                )
+            return (
+                gr.update(),  # keep risk analysis as is
+                gr.update(visible=False)  # hide warning
+            )
+        
+        def handle_catalyst_analysis_attempt(include_catalyst, use_sentiment):
+            """Handle attempt to check catalyst analysis without sentiment enabled"""
+            if include_catalyst and not use_sentiment:
+                return (
+                    gr.update(value=False),  # uncheck catalyst analysis
+                    gr.update(value="⚠️ **Cannot Enable Catalyst Analysis**\n\nCatalyst Analysis requires sentiment analysis to be enabled.\n\nPlease enable sentiment analysis first.", visible=True)  # warning
+                )
+            return (
+                gr.update(),  # keep catalyst analysis as is
+                gr.update(visible=False)  # hide warning
+            )
+        
         # Connect event handlers
         # Strategy parameter visibility
         strategy.change(
@@ -708,8 +992,9 @@ Please review the error message and adjust your settings accordingly.
             inputs=[symbol_input, start_date, end_date, initial_capital, strategy, 
                    sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                    bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
-                   analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis],
-            outputs=simulation_output
+                   analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
+                   sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight],
+            outputs=[simulation_summary, simulation_performance, simulation_output]
         )
         
         backtest_btn.click(
@@ -718,6 +1003,7 @@ Please review the error message and adjust your settings accordingly.
                    sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                    bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                    analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
+                   sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
                    enable_optimization, optimization_split_ratio, compare_sentiment_versions, 
                    optimization_speed, max_combinations],
             outputs=[optimization_summary, performance_summary, backtest_output]
@@ -727,6 +1013,27 @@ Please review the error message and adjust your settings accordingly.
         use_sentiment.change(
             fn=refresh_api_status,
             outputs=api_status
+        )
+        
+        # Handle sentiment toggle
+        use_sentiment.change(
+            fn=handle_sentiment_toggle,
+            inputs=[use_sentiment],
+            outputs=[include_risk_analysis, include_catalyst_analysis, sentiment_warning]
+        )
+        
+        # Handle risk analysis attempt
+        include_risk_analysis.change(
+            fn=handle_risk_analysis_attempt,
+            inputs=[include_risk_analysis, use_sentiment],
+            outputs=[include_risk_analysis, sentiment_warning]
+        )
+        
+        # Handle catalyst analysis attempt
+        include_catalyst_analysis.change(
+            fn=handle_catalyst_analysis_attempt,
+            inputs=[include_catalyst_analysis, use_sentiment],
+            outputs=[include_catalyst_analysis, sentiment_warning]
         )
     
     return demo
@@ -1481,19 +1788,12 @@ def format_single_asset_risk_results(result: dict) -> str:
         row_style = "background: #f8f9fa;" if i % 2 == 0 else ""
         scenario_name = scenario.replace('_', ' ').title()
         
-        if 'loss_pct' in data:
-            loss_pct = data.get('loss_pct', 0)
-            loss_dollar = data.get('loss_dollar', 0)
-        else:
-            loss_pct = data.get('stressed_var_pct', 0)
-            loss_dollar = data.get('stressed_var_dollar', 0)
-        
         html += f"""
                         <tr style='{row_style}'>
                             <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'><strong>{scenario_name}</strong></td>
                             <td style='padding: 10px; border-bottom: 1px solid #dee2e6;'>{data.get('description', 'N/A')}</td>
-                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{loss_pct:.2f}%</td>
-                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(loss_dollar)}</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{data.get('loss_pct', 0):.2f}%</td>
+                            <td style='padding: 10px; text-align: center; border-bottom: 1px solid #dee2e6;'>{format_currency(data.get('loss_dollar', 0))}</td>
                         </tr>
         """
     
