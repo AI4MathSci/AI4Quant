@@ -40,23 +40,33 @@ class QuantFinLlamaEngine:
         self.query_engine = None
         self.document_count = 0
     
-    async def build_financial_knowledge_base(self, symbol: str, scope: str = "news", days_back: int = 30) -> None:
-        """Build knowledge base based on analysis scope"""
+    async def build_financial_knowledge_base(self, symbol: str, scope: str = "news", days_back: int = 30, analysis_date: str = None) -> None:
+        """Build knowledge base based on analysis scope with date-specific context"""
         documents = []
         
         try:
-            logger.info(f"Building knowledge base for {symbol} with scope '{scope}' (last {days_back} days)")
+            if analysis_date:
+                logger.info(f"Building knowledge base for {symbol} with scope '{scope}' as of {analysis_date} (last {days_back} days)")
+            else:
+                logger.error("analysis_date is required for temporal sentiment analysis")
+                raise ValueError("analysis_date parameter is required for temporal sentiment analysis")
             
             if scope in ["news", "comprehensive"]:
-                # Get financial news from Yahoo RSS
-                news_docs = await self._get_financial_news(symbol, days_back)
+                # Try Alpha Vantage historical news first
+                alpha_news = await self._get_alpha_vantage_news(symbol, analysis_date, days_back)
+                if alpha_news:
+                    documents.extend(alpha_news)
+                    logger.info(f"Added {len(alpha_news)} Alpha Vantage news articles")
+                
+                # Get financial news from Yahoo RSS with date context
+                news_docs = await self._get_financial_news(symbol, days_back, analysis_date)
                 documents.extend(news_docs)
                 logger.info(f"Added {len(news_docs)} news documents")
                 
                 # Only use SEC 8-K as backup if no news found AND scope is "news" only
                 if len(news_docs) == 0 and scope == "news":
                     logger.info("No news found, fetching SEC 8-K filings as news substitute")
-                    sec_news_docs = await self._get_sec_filings(symbol)
+                    sec_news_docs = await self._get_sec_filings(symbol, analysis_date)
                     # Filter for 8-K filings only (current reports = news-like)
                     filtered_docs = [doc for doc in sec_news_docs if '8-K' in doc.metadata.get('form_type', '')]
                     documents.extend(filtered_docs)
@@ -64,7 +74,7 @@ class QuantFinLlamaEngine:
             
             if scope in ["filings", "comprehensive"]:
                 # Include SEC filings for comprehensive analysis
-                sec_docs = await self._get_sec_filings(symbol)
+                sec_docs = await self._get_sec_filings(symbol, analysis_date)
                 documents.extend(sec_docs)
                 logger.info(f"Added {len(sec_docs)} SEC filing documents")
             
@@ -289,10 +299,10 @@ class QuantFinLlamaEngine:
         }
     
     # Data source methods (stub implementations for now)
-    async def _get_financial_news(self, symbol: str, days_back: int) -> List:
-        """Get financial news documents from Yahoo Finance RSS"""
+    async def _get_financial_news(self, symbol: str, days_back: int, analysis_date: str) -> List:
+        """Get financial news documents from Yahoo Finance RSS with date-specific filtering"""
         try:
-            logger.info(f"Fetching Yahoo Finance RSS news for {symbol} (last {days_back} days)")
+            logger.info(f"Fetching Yahoo Finance RSS news for {symbol} as of {analysis_date} (last {days_back} days)")
             
             # Yahoo Finance RSS feed for the symbol
             rss_url = f"https://finance.yahoo.com/rss/headline?s={symbol}"
@@ -322,8 +332,19 @@ class QuantFinLlamaEngine:
                         feed = feedparser.parse(content)
                         documents = []
                         
-                        # Calculate cutoff date
-                        cutoff_date = datetime.now() - timedelta(days=days_back)
+                        # Calculate date range based on analysis_date
+                        analysis_dt = datetime.strptime(analysis_date, '%Y-%m-%d')
+                        start_date = analysis_dt - timedelta(days=days_back)
+                        end_date = analysis_dt
+                        
+                        logger.info(f"=== TEMPORAL FILTERING DEBUG ===")
+                        logger.info(f"Analysis Date: {analysis_date}")
+                        logger.info(f"Days Back: {days_back}")
+                        logger.info(f"Start Date (inclusive): {start_date.strftime('%Y-%m-%d')}")
+                        logger.info(f"End Date (inclusive): {end_date.strftime('%Y-%m-%d')}")
+                        logger.info(f"Date Range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+                        logger.info(f"Total Days in Range: {(end_date - start_date).days + 1}")
+                        logger.info(f"=== END TEMPORAL FILTERING DEBUG ===")
                         
                         logger.info(f"Found {len(feed.entries)} total RSS entries for {symbol}")
                         
@@ -336,11 +357,12 @@ class QuantFinLlamaEngine:
                                     # Fallback: try to parse published string
                                     pub_date = datetime.strptime(entry.published, '%a, %d %b %Y %H:%M:%S %z').replace(tzinfo=None)
                                 else:
-                                    # If no date, include it (assume recent)
-                                    pub_date = datetime.now()
+                                    # If no date, exclude it (don't assume recent)
+                                    logger.warning(f"Article '{getattr(entry, 'title', 'No title')[:50]}...' has no publish date, excluding")
+                                    continue
                                 
-                                # Filter by date range
-                                if pub_date < cutoff_date:
+                                # Filter by date range - only include news available up to analysis_date
+                                if pub_date < start_date or pub_date > end_date:
                                     continue
                                 
                                 # Extract title and summary
@@ -360,7 +382,11 @@ class QuantFinLlamaEngine:
                                         "symbol": symbol,
                                         "published": entry.published if hasattr(entry, 'published') else str(pub_date),
                                         "url": link,
-                                        "news_type": "financial_news"
+                                        "news_type": "financial_news",
+                                        "analysis_date": analysis_date,
+                                        "date_range_start": start_date.strftime('%Y-%m-%d'),
+                                        "date_range_end": end_date.strftime('%Y-%m-%d'),
+                                        "days_back": days_back
                                     }
                                 )
                                 documents.append(doc)
@@ -369,7 +395,16 @@ class QuantFinLlamaEngine:
                                 logger.warning(f"Error processing RSS entry: {e}")
                                 continue
                         
-                        logger.info(f"Retrieved {len(documents)} relevant news articles for {symbol} (within {days_back} days)")
+                        # Summary statistics
+                        logger.info(f"=== NEWS FILTERING SUMMARY ===")
+                        logger.info(f"Total RSS entries found: {len(feed.entries)}")
+                        logger.info(f"Entries checked: {len(feed.entries[:20])}")
+                        logger.info(f"Entries within date range: {len(documents)}")
+                        logger.info(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+                        logger.info(f"Analysis date: {analysis_date}")
+                        logger.info(f"=== END NEWS FILTERING SUMMARY ===")
+                        
+                        logger.info(f"Retrieved {len(documents)} relevant news articles for {symbol} (within {days_back} days of {analysis_date})")
                         return documents
                     else:
                         logger.warning(f"Yahoo RSS returned status {response.status} for {symbol}")
@@ -379,10 +414,10 @@ class QuantFinLlamaEngine:
             logger.error(f"Error fetching Yahoo Finance RSS news for {symbol}: {e}")
             return []
     
-    async def _get_sec_filings(self, symbol: str) -> List:
-        """Get SEC filing documents for the company"""
+    async def _get_sec_filings(self, symbol: str, analysis_date: str = None) -> List:
+        """Get SEC filing documents for the company with date filtering"""
         try:
-            logger.info(f"Fetching SEC filings for {symbol}")
+            logger.info(f"Fetching SEC filings for {symbol} as of {analysis_date}")
             
             # Get company CIK (Central Index Key) from ticker
             cik = await self._get_company_cik(symbol)
@@ -392,12 +427,12 @@ class QuantFinLlamaEngine:
             
             logger.info(f"Found CIK {cik} for {symbol}")
             
-            # Get recent filings (10-K, 10-Q, 8-K)
-            filings_data = await self._fetch_recent_filings(cik)
+            # Get recent filings (10-K, 10-Q, 8-K) with date filtering
+            filings_data = await self._fetch_recent_filings(cik, analysis_date)
             
             # Convert filings to LlamaIndex documents
             documents = []
-            for filing in filings_data[:5]:  # Process 5 most recent filings (increased from 1)
+            for filing in filings_data:
                 logger.info(f"Processing filing: {filing}")
                 doc_content = await self._fetch_filing_content(filing, cik)
                 if doc_content:
@@ -408,7 +443,8 @@ class QuantFinLlamaEngine:
                             "source": f"SEC {filing['form']} Filing",
                             "symbol": symbol,
                             "filing_date": filing['filingDate'],
-                            "form_type": filing['form']
+                            "form_type": filing['form'],
+                            "analysis_date": analysis_date
                         }
                     )
                     documents.append(doc)
@@ -447,7 +483,7 @@ class QuantFinLlamaEngine:
             logger.error(f"Error getting CIK for {symbol}: {e}")
             return None
 
-    async def _fetch_recent_filings(self, cik: str) -> List[Dict]:
+    async def _fetch_recent_filings(self, cik: str, analysis_date: str = None) -> List[Dict]:
         """Fetch recent SEC filings for a company"""
         try:
             url = f"https://data.sec.gov/submissions/CIK{cik}.json"
@@ -490,7 +526,19 @@ class QuantFinLlamaEngine:
                         
                         # Sort by date (most recent first)
                         recent_filings.sort(key=lambda x: x['filingDate'], reverse=True)
-                        return recent_filings[:10]  # Return 10 most recent
+                        
+                        # Apply date filtering if analysis_date provided
+                        if analysis_date:
+                            analysis_dt = datetime.strptime(analysis_date, '%Y-%m-%d')
+                            # Filter filings up to analysis_date
+                            relevant_filings = [f for f in recent_filings if datetime.strptime(f['filingDate'], '%Y-%m-%d') <= analysis_dt]
+                            # Sort by proximity to analysis_date (closest first)
+                            relevant_filings.sort(key=lambda x: abs((datetime.strptime(x['filingDate'], '%Y-%m-%d') - analysis_dt).days))
+                            
+                            logger.info(f"Found {len(relevant_filings)} filings up to {analysis_date} out of {len(recent_filings)} total")
+                            return relevant_filings[:5]  # Return 5 closest to analysis_date
+                        else:
+                            return recent_filings[:10]  # Return 10 most recent
                     else:
                         logger.error(f"SEC API returned status {response.status}")
             return []
@@ -545,4 +593,86 @@ class QuantFinLlamaEngine:
             return clean.strip()
         except Exception as e:
             logger.warning(f"Error cleaning SEC filing content: {e}")
-            return html_content  # Return raw content if cleaning fails 
+            return html_content  # Return raw content if cleaning fails
+
+    async def _get_alpha_vantage_news(self, symbol: str, analysis_date: str, days_back: int = 30) -> List:
+        """Get historical financial news from Alpha Vantage API"""
+        # Initialize Alpha Vantage config if not already done
+        if not hasattr(self, 'alpha_vantage_api_key'):
+            self.alpha_vantage_api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+            self.alpha_vantage_base_url = "https://www.alphavantage.co/query"
+        
+        if not self.alpha_vantage_api_key:
+            logger.warning("Alpha Vantage API key not configured, skipping historical news")
+            return []
+            
+        try:
+            # Calculate date range
+            analysis_dt = datetime.strptime(analysis_date, '%Y-%m-%d')
+            start_date = analysis_dt - timedelta(days=days_back)
+            
+            logger.info(f"Fetching Alpha Vantage news for {symbol} from {start_date.strftime('%Y-%m-%d')} to {analysis_date}")
+            
+            # Alpha Vantage News API call with correct parameters
+            params = {
+                'function': 'NEWS_SENTIMENT',
+                'tickers': symbol,
+                'apikey': self.alpha_vantage_api_key,
+                'time_from': start_date.strftime('%Y%m%dT0000'),
+                'time_to': analysis_dt.strftime('%Y%m%dT2359'),
+                'limit': 50,
+                'sort': 'LATEST'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.alpha_vantage_base_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        # Check for API errors
+                        if 'Error Message' in data:
+                            logger.error(f"Alpha Vantage API error: {data['Error Message']}")
+                            return []
+                        
+                        if 'Information' in data:
+                            logger.warning(f"Alpha Vantage API info: {data['Information']}")
+                            return []
+                        
+                        if 'feed' in data and data['feed']:
+                            logger.info(f"Alpha Vantage: Found {len(data['feed'])} news articles for {symbol}")
+                            
+                            documents = []
+                            for article in data['feed']:
+                                from llama_index.core import Document
+                                
+                                # Create document text from title and summary
+                                doc_text = f"Title: {article.get('title', '')}\n\nSummary: {article.get('summary', '')}"
+                                
+                                doc = Document(
+                                    text=doc_text,
+                                    metadata={
+                                        "source": "Alpha Vantage News",
+                                        "symbol": symbol,
+                                        "published": article.get('time_published', ''),
+                                        "url": article.get('url', ''),
+                                        "news_type": "financial_news",
+                                        "analysis_date": analysis_date,
+                                        "sentiment_score": article.get('overall_sentiment_score', 0),
+                                        "sentiment_label": article.get('overall_sentiment_label', 'neutral'),
+                                        "authors": article.get('authors', []),
+                                        "topics": [topic.get('topic', '') for topic in article.get('topics', [])]
+                                    }
+                                )
+                                documents.append(doc)
+                            
+                            return documents
+                        else:
+                            logger.info(f"Alpha Vantage: No news articles found for {symbol}")
+                            return []
+                    else:
+                        logger.warning(f"Alpha Vantage API error: {response.status}")
+                        return []
+                        
+        except Exception as e:
+            logger.error(f"Error fetching Alpha Vantage news: {e}")
+            return [] 
