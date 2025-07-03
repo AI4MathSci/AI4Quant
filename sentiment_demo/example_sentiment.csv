@@ -1,0 +1,11 @@
+timestamp,source,sentiment_score
+2025-05-01,reddit,0.2
+2025-05-02,reddit,0.1
+2025-05-03,reddit,-0.1
+2025-05-04,reddit,0.05
+2025-05-05,reddit,0.3
+2025-05-06,news,0.4
+2025-05-07,news,-0.3
+2025-05-08,news,0.1
+2025-05-09,news,0.0
+2025-05-10,news,0.2
