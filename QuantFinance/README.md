@@ -1,6 +1,6 @@
 # QuantFinance Platform
 
-A comprehensive quantitative finance platform with **AI-powered sentiment analysis** and **professional-grade backtesting**. The system provides advanced trading strategy simulation, parameter optimization, and sentiment-enhanced decision making using state-of-the-art LLM technology.
+A comprehensive quantitative finance platform with **AI-powered sentiment analysis** and **professional-grade backtesting**. The system provides advanced trading strategy simulation, parameter optimization (for backtesting), and sentiment-enhanced decision making using state-of-the-art LLM technology.
 
 ## 🚀 Key Features
 
@@ -8,12 +8,12 @@ A comprehensive quantitative finance platform with **AI-powered sentiment analys
 - **Simple Moving Average (SMA)** with configurable windows
 - **RSI (Relative Strength Index)** with customizable overbought/oversold levels  
 - **Bollinger Bands** with adjustable periods and deviations
-- **Real-time simulation** and **historical backtesting**
+- **Trading simulation** and **historical backtesting**
 
 ### 🧠 **AI-Powered Sentiment Analysis**
 - **Temporal sentiment analysis** with date-specific historical context
-- **Multi-source analysis**: SEC filings, Alpha Vantage news, Yahoo Finance RSS
-- **Trading days alignment** using NYSE calendar for accurate market timing
+- **Multi-source analysis**: SEC filings, Alpha Vantage news (Yahoo Finance RSS disabled due to lack of historical coverage needed for simulation and backtesting)
+- **Trading days alignment** using Yahoo finance market data's calendar for accurate market timing
 - **Global sentiment caching** for efficient optimization
 - **LLM-driven sentiment parsing** with confidence scoring
 - **Risk factor and catalyst analysis**
@@ -38,7 +38,6 @@ A comprehensive quantitative finance platform with **AI-powered sentiment analys
 - **RESTful API backend** using FastAPI
 - **Efficient data caching** for sentiment analysis
 - **Error handling and validation**
-- **Debug logging** throughout the system
 - **Configurable optimization intensity**
 
 ## 🧰 **Technology Stack**
@@ -59,7 +58,7 @@ This project is built on top of exceptional open-source libraries. We give full 
 
 ### **📡 Data & Web Services**
 - **[FastAPI](https://github.com/tiangolo/fastapi)** - Modern, high-performance web framework for APIs
-- **[Gradio](https://github.com/gradio-app/gradio)** - Fast, easy-to-use web UI for machine learning
+- **[Gradio](https://github.com/gradio-app/gradio)** - Fast, easy-to-use web UI
 - **[BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/)** - HTML/XML parsing for web scraping
 - **[Feedparser](https://github.com/kurtmckee/feedparser)** - RSS/Atom feed parsing
 - **[HTTPX](https://github.com/encode/httpx)** - Modern HTTP client for async operations
@@ -167,13 +166,20 @@ cp .env.template .env
 ```
 2. **Configure OpenAI API**:
 ```env
-# Edit .env with your OpenAI API key
+# Edit .env with your API keys and parameters
 
-# Required for sentiment analysis
+# Recommended for enhanced sentiment analysis (optional)
+# Without this key, sentiment analysis will use keyword-based fallback
 OPENAI_API_KEY=sk-your-openai-api-key-here
 
 # Required for historical news and SEC filings (free tier: 500 calls/day)
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
+
+# Variables to determine the frequency of API calls (in number of trading days two consecutive API calls are apart from each other)
+OPENAI_API_FREQUENCY_MAX=60
+OPENAI_API_FREQUENCY_DEFAULT=60
+ALPHA_VANTAGE_API_FREQUENCY_MAX=60
+ALPHA_VANTAGE_API_FREQUENCY_DEFAULT=30
 
 # Optional: Model configuration
 OPENAI_MODEL=gpt-4  # or gpt-3.5-turbo
@@ -194,7 +200,7 @@ OPENAI_MODEL=gpt-4  # or gpt-3.5-turbo
 3. Get your API key (free tier: 500 calls/day)
 4. Copy the key to your `.env` file
 
-**Note**: Without an OpenAI API key, sentiment analysis will be disabled, but technical trading strategies will work normally. Alpha Vantage API key is optional and provides additional historical news data.
+**Note**: Without an OpenAI API key, sentiment analysis will use keyword-based fallback methods, but technical trading strategies will work normally. Alpha Vantage API key is required  and provides additional historical news data.
 
 ## 📊 Trading Features
 
@@ -338,7 +344,6 @@ This project is licensed under the MIT License.
 
 ## 🎯 Roadmap
 
-- [ ] **Machine Learning Models**: LSTM, Random Forest integration
 - [ ] **Real-time Trading**: Live market data streaming
 - [ ] **Advanced Risk Metrics**: VaR, CVaR, Sharpe ratio optimization
 - [ ] **Multi-asset Portfolios**: Cross-asset optimization

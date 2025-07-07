@@ -27,10 +27,7 @@ dependencies = [
     "pandas>=2.1.0",
     "numpy>=1.24.0",
     "requests>=2.31.0",
-    
-    # Market Calendar Dependencies
-    "pandas_market_calendars>=4.0.0",  # For market calendar functionality (NYSE, trading days)
-    
+        
     # NEW: Algorithmic Trading Dependencies
     "backtrader>=1.9.78.123",      # For trading strategies (SMA, RSI, Bollinger Bands)
     

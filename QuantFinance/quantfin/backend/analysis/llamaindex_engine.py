@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from quantfin.backend.config.config import config
+from quantfin.backend.config.config import full_sentiment_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -21,71 +22,78 @@ class QuantFinLlamaEngine:
     """Optimized LlamaIndex-powered financial analysis engine"""
     
     def __init__(self):
-        if not config.has_openai_key:
-            raise ValueError("OpenAI API key required for LlamaIndex")
-        
-        # Configure LlamaIndex settings
-        Settings.llm = OpenAI(
-            api_key=config.OPENAI_API_KEY,
-            model=config.openai_model,
-            temperature=0.1
-        )
-        Settings.embed_model = OpenAIEmbedding(
-            api_key=config.OPENAI_API_KEY,
-            model="text-embedding-3-small"
-        )
-        Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+        if full_sentiment_analysis:
+            logger.info("LlamaIndex will use full sentiment analysis capabilities- OpenAI API key configured.")
+            # Configure LlamaIndex settings
+            Settings.llm = OpenAI(
+                api_key=config.OPENAI_API_KEY,
+                model=config.openai_model,
+                temperature=0.1
+            )
+            Settings.embed_model = OpenAIEmbedding(
+                api_key=config.OPENAI_API_KEY,
+                model="text-embedding-3-small"
+            )
+            Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+        else:
+            logger.info("LlamaIndex cannnot use full sentiment analysis, will use keyword-based sentiment analysis only - OpenAI API key not configured.")
         
         self.index = None
         self.query_engine = None
         self.document_count = 0
     
-    async def build_financial_knowledge_base(self, symbol: str, scope: str = "news", days_back: int = 30, analysis_date: str = None) -> None:
-        """Build knowledge base based on analysis scope with date-specific context"""
+    async def retrieve_documents(self, symbol: str, scope: str = "news", analysis_date: str = None, days_back: int = 30, trading_day_index: int = None, alpha_vantage_api_frequency: int = 10) -> List:
         documents = []
-        
+        if scope in ["news", "comprehensive"]:
+            # Try Alpha Vantage historical news first
+            if trading_day_index is not None and trading_day_index % alpha_vantage_api_frequency == 0:
+                logger.info(f"Making Alpha Vantage API call for {symbol} on {analysis_date} (trading day {trading_day_index}, frequency: every {alpha_vantage_api_frequency} days)")
+                alpha_news = await self._get_alpha_vantage_news(symbol, analysis_date, days_back)
+                if alpha_news:
+                    documents.extend(alpha_news)
+                    logger.info(f"Added {len(alpha_news)} Alpha Vantage news articles")
+                
+            # Get financial news from Yahoo RSS with date context, it turns out Yahoo RSS only retrieves the latest news, 
+            # there is no historical news, and that is what we need, so we comment out the following code block
+            #news_docs = await self._get_financial_news(symbol, analysis_date, days_back)
+            #documents.extend(news_docs)
+            #logger.info(f"Added {len(news_docs)} news documents")
+                
+            # Only use SEC 8-K as backup if no news found AND scope is "news" only, so far the documents should all be news
+            if len(documents) == 0 and scope == "news":
+                logger.info("No news found, fetching SEC 8-K filings as news substitute")
+                sec_news_docs = await self._get_sec_filings(symbol, analysis_date)
+                # Filter for 8-K filings only (current reports = news-like)
+                filtered_docs = [doc for doc in sec_news_docs if '8-K' in doc.metadata.get('form_type', '')]
+                documents.extend(filtered_docs)
+                logger.info(f"Added {len(filtered_docs)} SEC 8-K filings as news substitute")
+            
+        if scope in ["filings", "comprehensive"]:
+            # Include SEC filings for comprehensive analysis
+            sec_docs = await self._get_sec_filings(symbol, analysis_date)
+            documents.extend(sec_docs)
+            logger.info(f"Added {len(sec_docs)} SEC filing documents")
+            
+        if scope == "comprehensive":
+            # Include earnings transcripts for comprehensive analysis
+            earnings_docs = await self._get_earnings_transcripts(symbol)
+            documents.extend(earnings_docs)
+            logger.info(f"Added {len(earnings_docs)} earnings documents")
+
+        return documents
+   
+    async def build_financial_knowledge_base(self, symbol: str, scope: str = "news", analysis_date: str = None, days_back: int = 30, trading_day_index: int = None, alpha_vantage_api_frequency: int = 10) -> None:
+        """Build knowledge base based on analysis scope with date-specific context"""
         try:
             if analysis_date:
                 logger.info(f"Building knowledge base for {symbol} with scope '{scope}' as of {analysis_date} (last {days_back} days)")
             else:
                 logger.error("analysis_date is required for temporal sentiment analysis")
                 raise ValueError("analysis_date parameter is required for temporal sentiment analysis")
-            
-            if scope in ["news", "comprehensive"]:
-                # Try Alpha Vantage historical news first
-                alpha_news = await self._get_alpha_vantage_news(symbol, analysis_date, days_back)
-                if alpha_news:
-                    documents.extend(alpha_news)
-                    logger.info(f"Added {len(alpha_news)} Alpha Vantage news articles")
-                
-                # Get financial news from Yahoo RSS with date context
-                news_docs = await self._get_financial_news(symbol, days_back, analysis_date)
-                documents.extend(news_docs)
-                logger.info(f"Added {len(news_docs)} news documents")
-                
-                # Only use SEC 8-K as backup if no news found AND scope is "news" only
-                if len(news_docs) == 0 and scope == "news":
-                    logger.info("No news found, fetching SEC 8-K filings as news substitute")
-                    sec_news_docs = await self._get_sec_filings(symbol, analysis_date)
-                    # Filter for 8-K filings only (current reports = news-like)
-                    filtered_docs = [doc for doc in sec_news_docs if '8-K' in doc.metadata.get('form_type', '')]
-                    documents.extend(filtered_docs)
-                    logger.info(f"Added {len(filtered_docs)} SEC 8-K filings as news substitute")
-            
-            if scope in ["filings", "comprehensive"]:
-                # Include SEC filings for comprehensive analysis
-                sec_docs = await self._get_sec_filings(symbol, analysis_date)
-                documents.extend(sec_docs)
-                logger.info(f"Added {len(sec_docs)} SEC filing documents")
-            
-            if scope == "comprehensive":
-                # Include earnings transcripts for comprehensive analysis
-                earnings_docs = await self._get_earnings_transcripts(symbol)
-                documents.extend(earnings_docs)
-                logger.info(f"Added {len(earnings_docs)} earnings documents")
-            
+            documents = await self.retrieve_documents(symbol, scope, analysis_date, days_back, trading_day_index, alpha_vantage_api_frequency)
+
             if documents:
-                logger.info(f"Creating vector index from {len(documents)} documents...")
+                #logger.info(f"Creating vector index from {len(documents)} documents...")
                 self.index = VectorStoreIndex.from_documents(documents)
                 self.query_engine = self.index.as_query_engine()
                 self.document_count = len(documents)
@@ -216,6 +224,45 @@ class QuantFinLlamaEngine:
             "source_count": 0
         }
     
+    def _get_keyword_sentiment(self, text: str) -> Dict[str, Any]:
+        """Get sentiment using keyword-based method"""
+        text_lower = text.lower()
+
+        # Enhanced financial keywords
+        bullish_indicators = [
+            "bullish", "positive", "optimistic", "strong outlook", "growth potential", 
+            "buy", "uptrend", "earnings beat", "revenue growth", "market leader",
+            "innovation", "expansion", "partnership", "upgrade", "buy rating",
+            "strong performance", "outperform", "beat expectations"
+        ]
+        bearish_indicators = [
+            "bearish", "negative", "pessimistic", "weak outlook", "declining", 
+            "sell", "downtrend", "earnings miss", "revenue decline", "market share loss",
+            "downgrade", "sell rating", "layoffs", "bankruptcy", "regulatory issues",
+            "weak performance", "underperform", "miss expectations"
+        ]
+        
+        bullish_score = sum(1 for indicator in bullish_indicators if indicator in text_lower)
+        bearish_score = sum(1 for indicator in bearish_indicators if indicator in text_lower)
+        
+        if bullish_score > bearish_score:
+            sentiment = "bullish"
+            score = min(0.8, 0.3 + (bullish_score - bearish_score) * 0.1)
+        elif bearish_score > bullish_score:
+            sentiment = "bearish" 
+            score = max(-0.8, -0.3 - (bearish_score - bullish_score) * 0.1)
+        else:
+            sentiment = "neutral"
+            score = 0.0
+        
+        confidence = min(0.9, 0.4 + len(text.split()) / 1000)
+        
+        return {
+            "sentiment": sentiment,
+            "score": score,
+            "confidence": confidence
+        }
+
     # Parsing methods (enhanced but still simplified)
     async def _parse_llm_sentiment(self, response: str) -> Dict[str, Any]:
         """Parse LLM response into structured sentiment"""
@@ -254,24 +301,10 @@ class QuantFinLlamaEngine:
                 score = 0.0
         else:
             # Fallback to keyword-based sentiment detection
-            bullish_indicators = ["bullish", "positive", "optimistic", "strong outlook", "growth potential", "buy", "uptrend"]
-            bearish_indicators = ["bearish", "negative", "pessimistic", "weak outlook", "declining", "sell", "downtrend"]
-            
-            bullish_score = sum(1 for indicator in bullish_indicators if indicator in response_lower)
-            bearish_score = sum(1 for indicator in bearish_indicators if indicator in response_lower)
-            
-            if bullish_score > bearish_score:
-                sentiment = "bullish"
-                score = min(0.8, 0.3 + (bullish_score - bearish_score) * 0.1)
-            elif bearish_score > bullish_score:
-                sentiment = "bearish" 
-                score = max(-0.8, -0.3 - (bearish_score - bullish_score) * 0.1)
-            else:
-                sentiment = "neutral"
-                score = 0.0
-            
-            # Confidence based on response length and specificity
-            confidence = min(0.9, 0.4 + len(response.split()) / 1000)
+            keyword_result = self._get_keyword_sentiment(response_lower)
+            sentiment = keyword_result["sentiment"]
+            score = keyword_result["score"]
+            confidence = keyword_result["confidence"]
         
         return {
             "sentiment": sentiment,
@@ -299,7 +332,7 @@ class QuantFinLlamaEngine:
         }
     
     # Data source methods (stub implementations for now)
-    async def _get_financial_news(self, symbol: str, days_back: int, analysis_date: str) -> List:
+    async def _get_financial_news(self, symbol: str, analysis_date: str, days_back: int) -> List:
         """Get financial news documents from Yahoo Finance RSS with date-specific filtering"""
         try:
             logger.info(f"Fetching Yahoo Finance RSS news for {symbol} as of {analysis_date} (last {days_back} days)")
@@ -336,7 +369,7 @@ class QuantFinLlamaEngine:
                         analysis_dt = datetime.strptime(analysis_date, '%Y-%m-%d')
                         start_date = analysis_dt - timedelta(days=days_back)
                         end_date = analysis_dt
-                        
+                        """
                         logger.info(f"=== TEMPORAL FILTERING DEBUG ===")
                         logger.info(f"Analysis Date: {analysis_date}")
                         logger.info(f"Days Back: {days_back}")
@@ -345,7 +378,7 @@ class QuantFinLlamaEngine:
                         logger.info(f"Date Range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
                         logger.info(f"Total Days in Range: {(end_date - start_date).days + 1}")
                         logger.info(f"=== END TEMPORAL FILTERING DEBUG ===")
-                        
+                        """
                         logger.info(f"Found {len(feed.entries)} total RSS entries for {symbol}")
                         
                         for entry in feed.entries[:20]:  # Limit to 20 most recent articles
@@ -396,14 +429,15 @@ class QuantFinLlamaEngine:
                                 continue
                         
                         # Summary statistics
+                        """
                         logger.info(f"=== NEWS FILTERING SUMMARY ===")
                         logger.info(f"Total RSS entries found: {len(feed.entries)}")
                         logger.info(f"Entries checked: {len(feed.entries[:20])}")
                         logger.info(f"Entries within date range: {len(documents)}")
                         logger.info(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+                        """
                         logger.info(f"Analysis date: {analysis_date}")
-                        logger.info(f"=== END NEWS FILTERING SUMMARY ===")
-                        
+                        #logger.info(f"=== END NEWS FILTERING SUMMARY ===")
                         logger.info(f"Retrieved {len(documents)} relevant news articles for {symbol} (within {days_back} days of {analysis_date})")
                         return documents
                     else:
@@ -425,7 +459,7 @@ class QuantFinLlamaEngine:
                 logger.warning(f"Could not find CIK for symbol {symbol}")
                 return []
             
-            logger.info(f"Found CIK {cik} for {symbol}")
+            #logger.info(f"Found CIK {cik} for {symbol}")
             
             # Get recent filings (10-K, 10-Q, 8-K) with date filtering
             filings_data = await self._fetch_recent_filings(cik, analysis_date)
@@ -433,7 +467,7 @@ class QuantFinLlamaEngine:
             # Convert filings to LlamaIndex documents
             documents = []
             for filing in filings_data:
-                logger.info(f"Processing filing: {filing}")
+                #logger.info(f"Processing filing: {filing}")
                 doc_content = await self._fetch_filing_content(filing, cik)
                 if doc_content:
                     from llama_index.core import Document
@@ -498,16 +532,16 @@ class QuantFinLlamaEngine:
                     logger.info(f"SEC API response status: {response.status}")
                     if response.status == 200:
                         data = await response.json()
-                        logger.info(f"SEC API response keys: {list(data.keys())}")
+                        #logger.info(f"SEC API response keys: {list(data.keys())}")
                         
                         filings = data.get('filings', {}).get('recent', {})
-                        logger.info(f"Filings keys: {list(filings.keys())}")
+                        #logger.info(f"Filings keys: {list(filings.keys())}")
                         
                         if 'form' in filings:
                             total_forms = len(filings['form'])
-                            logger.info(f"Total forms found: {total_forms}")
-                            if total_forms > 0:
-                                logger.info(f"Sample forms: {filings['form'][:5]}")
+                            #logger.info(f"Total forms found: {total_forms}")
+                            #if total_forms > 0:
+                            #    logger.info(f"Sample forms: {filings['form'][:5]}")
                         
                         # Filter for important filing types
                         important_forms = ['10-K', '10-Q', '8-K', '10-K/A', '10-Q/A']
@@ -570,8 +604,8 @@ class QuantFinLlamaEngine:
                         # Extract text from HTML/XBRL (simplified)
                         clean_text = self._clean_sec_filing(content)
                         logger.info(f"Clean content length: {len(clean_text)}")
-                        if len(clean_text) > 0:
-                            logger.info(f"Content preview: {clean_text[:200]}...")
+                        #if len(clean_text) > 0:
+                        #    logger.info(f"Content preview: {clean_text[:200]}...")
                         return clean_text[:10000]  # Limit size for LlamaIndex
                     else:
                         logger.warning(f"Failed to fetch filing content, status: {response.status}")
@@ -595,8 +629,7 @@ class QuantFinLlamaEngine:
             logger.warning(f"Error cleaning SEC filing content: {e}")
             return html_content  # Return raw content if cleaning fails
 
-    async def _get_alpha_vantage_news(self, symbol: str, analysis_date: str, days_back: int = 30) -> List:
-        """Get historical financial news from Alpha Vantage API"""
+    async def _get_alpha_vantage_news(self, symbol: str, analysis_date: str, days_back: int = 30) -> list:
         # Initialize Alpha Vantage config if not already done
         if not hasattr(self, 'alpha_vantage_api_key'):
             self.alpha_vantage_api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
