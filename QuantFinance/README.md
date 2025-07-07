@@ -70,7 +70,7 @@ This project is built on top of exceptional open-source libraries. We give full 
 
 - **Python 3.10+**
 - **OpenAI API Key** (for sentiment analysis)
-- **Alpha Vantage API Key** (for historical news and SEC filings)
+- **Alpha Vantage API Key** (for historical news)
 - **[uv](https://github.com/astral-sh/uv)** - Fast Python package manager
 - **Internet connection** (for real-time data and sentiment analysis)
 
@@ -172,7 +172,8 @@ cp .env.template .env
 # Without this key, sentiment analysis will use keyword-based fallback
 OPENAI_API_KEY=sk-your-openai-api-key-here
 
-# Required for historical news and SEC filings (free tier: 500 calls/day)
+# Recommended for Alpha Vantage Historical news (free tier: 500 calls/day) (optional)
+# Without this key, sentiment analysis loses one source of historical news.
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
 
 # Variables to determine the frequency of API calls (in number of trading days two consecutive API calls are apart from each other)
