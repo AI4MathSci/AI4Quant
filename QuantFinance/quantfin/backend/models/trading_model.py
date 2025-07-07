@@ -7,10 +7,9 @@ from datetime import datetime, timedelta
 import logging
 import numpy as np
 from itertools import product
-import pandas_market_calendars as mcal
 
 from quantfin.backend.strategies.trading_strategy_factory import get_trading_strategy
-from quantfin.backend.config.config import config
+from quantfin.backend.config.config import full_sentiment_analysis
 from quantfin.backend.analysis.llamaindex_engine import QuantFinLlamaEngine
 
 
@@ -18,6 +17,19 @@ logger = logging.getLogger(__name__)
 
 # Global sentiment cache shared across all instances
 _sentiment_cache = {}
+_sentiment_params_cache = {
+    'symbol': 'AAPL',
+    'start_date': '2024-01-01',
+    'end_date': '2024-12-31',
+    'analysis_scope': 'news',
+    'openai_api_frequency': 5,
+    'alpha_vantage_api_frequency': 10,
+    'sentiment_decay_factor': 0.9,
+    'sentiment_combo_weight': 0.5,
+    'sentiment_confidence_threshold': 0.5,
+    'include_risk_analysis': False,
+    'include_catalyst_analysis': False
+}
 
 class TradingModel(BaseModel):
     """
@@ -46,7 +58,8 @@ class TradingModel(BaseModel):
     sentiment_confidence_threshold: float = 0.5
     
     # Sentiment API Call Controls
-    sentiment_api_frequency: int = 5  # Call API every N trading days
+    openai_api_frequency: int = 5  # Call OpenAI API every N trading days
+    alpha_vantage_api_frequency: int = 10  # Call Alpha Vantage API every N trading days
     sentiment_decay_factor: float = 0.9  # Decay factor for sentiment over time
     sentiment_combo_weight: float = 0.5  # Weight for combining decayed and keyword-based sentiment (0.5 = equal weight)
     
@@ -64,43 +77,9 @@ class TradingModel(BaseModel):
         # Allow private attributes in Pydantic model
         arbitrary_types_allowed = True
 
-    def _get_sentiment_cache_key(self, symbol: str, date: str = None) -> str:
-        """Generate cache key for sentiment data"""
-        if date:
-            return f"sentiment_{symbol}_{date}_{self.analysis_scope}"
-        else:
-            return f"sentiment_{symbol}_{self.start_date}_{self.end_date}_{self.analysis_scope}"
-
-    def _get_keyword_sentiment(self, text: str) -> Dict[str, Any]:
-        """Get sentiment using keyword-based method"""
-        text_lower = text.lower()
-        bullish_indicators = ["bullish", "positive", "optimistic", "strong outlook", "growth potential", "buy", "uptrend"]
-        bearish_indicators = ["bearish", "negative", "pessimistic", "weak outlook", "declining", "sell", "downtrend"]
-        
-        bullish_score = sum(1 for indicator in bullish_indicators if indicator in text_lower)
-        bearish_score = sum(1 for indicator in bearish_indicators if indicator in text_lower)
-        
-        if bullish_score > bearish_score:
-            sentiment = "bullish"
-            score = min(0.8, 0.3 + (bullish_score - bearish_score) * 0.1)
-        elif bearish_score > bullish_score:
-            sentiment = "bearish" 
-            score = max(-0.8, -0.3 - (bearish_score - bullish_score) * 0.1)
-        else:
-            sentiment = "neutral"
-            score = 0.0
-        
-        confidence = min(0.9, 0.4 + len(text.split()) / 1000)
-        
-        return {
-            "sentiment": sentiment,
-            "score": score,
-            "confidence": confidence
-        }
-
     async def _build_sentiment_data(self, symbol: str, trading_days) -> Dict[str, Any]:
         """
-        Build sentiment data dictionary for a given trading period with date-specific caching.
+        Build sentiment data dictionary for a given symbol and trading period 
         
         Args:
             symbol: Stock symbol
@@ -120,92 +99,150 @@ class TradingModel(BaseModel):
 
         for i, trading_day in enumerate(trading_days):
             date_str = trading_day.strftime('%Y-%m-%d')
+            if full_sentiment_analysis and i % self.openai_api_frequency == 0:
+                # Open AI API call day
+                logger.info(f"Building LlamaIndex knowledge base for {symbol} as of {date_str} (scope: {self.analysis_scope})")
             
-            if self.use_sentiment:
-                if i % self.sentiment_api_frequency == 0:
-                    # API call day - check cache for this specific date
-                    cache_key = self._get_sentiment_cache_key(symbol, date_str)
+                try:
+                    # Build knowledge base
+                    await self._llama_engine.build_financial_knowledge_base(
+                        symbol=symbol,
+                        scope=self.analysis_scope,
+                        days_back=30,
+                        analysis_date=date_str,
+                        trading_day_index=i,
+                        alpha_vantage_api_frequency=self.alpha_vantage_api_frequency
+                    )
+                
+                    # Get sentiment data
+                    sentiment_result = await self._llama_engine.get_sentiment_data(
+                        symbol=symbol,
+                        confidence_threshold=self.sentiment_confidence_threshold
+                    )
+                
+                    # Add optional analyses
+                    if self.include_risk_analysis and sentiment_result.get("enabled", False):
+                        logger.info("Including risk factor analysis")
+                        risk_analysis = await self._llama_engine.get_risk_analysis(symbol)
+                        sentiment_result["risk_analysis"] = risk_analysis
                     
-                    # Check global cache for this specific date
-                    global _sentiment_cache
-                    if cache_key in _sentiment_cache:
-                        logger.info(f"Using cached sentiment data for {symbol} on {date_str}")
-                        sentiment_data[date_str] = _sentiment_cache[cache_key]
-                    else:
-                        # API call day - no cache hit
-                        sentiment_data[date_str] = await self.get_sentiment_signal(symbol, date=date_str)
-                        # Cache the result for this specific date
-                        _sentiment_cache[cache_key] = sentiment_data[date_str]
-                    
+                    if self.include_catalyst_analysis and sentiment_result.get("enabled", False):
+                        logger.info("Including catalyst analysis")
+                        catalyst_analysis = await self._llama_engine.get_catalyst_analysis(symbol)
+                        sentiment_result["catalyst_analysis"] = catalyst_analysis
+                
+                    sentiment_data[date_str] = sentiment_result
+                    last_sentiment = sentiment_result
+                    last_sentiment_date = trading_day
+                
+                except Exception as e:
+                    logger.error(f"LlamaIndex sentiment analysis error: {e}")
+                    # Fallback to keyword sentiment
+                    keyword_result = await self._get_keyword_sentiment(symbol, date_str, i)
+                    sentiment_data[date_str] = {
+                        "sentiment": keyword_result["sentiment"],
+                        "score": keyword_result["score"],
+                        "confidence": keyword_result["confidence"],
+                        "enabled": True,
+                        "source": "keyword_analysis",
+                        "reasoning": f"Keyword-based sentiment analysis for {symbol}",
+                        "document_count": 1
+                    }
                     last_sentiment = sentiment_data[date_str]
                     last_sentiment_date = trading_day
-                else:
-                    # Non-API day: use hybrid fallback
-                    if last_sentiment is not None:
-                        # Decayed/interpolated value
-                        days_since = (trading_day - last_sentiment_date).days
-                        decayed_score = last_sentiment['score'] * (self.sentiment_decay_factor ** days_since)
-                    else:
-                        decayed_score = 0.0
-
-                    # Keyword-based fallback - use a simple text analysis
-                    # For now, we'll use a placeholder text that could be enhanced with actual news data
-                    placeholder_text = f"Market analysis for {symbol} on {date_str}"
-                    keyword_result = self._get_keyword_sentiment(placeholder_text)
-                    keyword_score = keyword_result.get('score', 0.0)
-
-                    # Combine the two scores
-                    combined_score = (self.sentiment_combo_weight * decayed_score + 
-                                    (1 - self.sentiment_combo_weight) * keyword_score)
-
-                    # Construct the fallback sentiment dictionary
-                    fallback_sentiment = {
-                        "sentiment": "bullish" if combined_score > 0.1 else "bearish" if combined_score < -0.1 else "neutral",
-                        "score": combined_score,
-                        "confidence": 0.5,
-                        "enabled": True,
-                        "source": "hybrid_fallback"
-                    }
-                    sentiment_data[date_str] = fallback_sentiment
+                
             else:
-                # Sentiment disabled
-                sentiment_data[date_str] = None
-        
+                # Either OpenAI API key is not avaliable so a full sentiment analysis cannot be conducted or a Non-API day: use hybrid fallback 
+                if last_sentiment is not None:
+                    days_since = (trading_day - last_sentiment_date).days
+                    decayed_score = last_sentiment['score'] * (self.sentiment_decay_factor ** days_since)
+                else:
+                    decayed_score = 0.0
+
+                keyword_result = await self._get_keyword_sentiment(symbol, date_str, i)
+                keyword_score = keyword_result.get('score', 0.0)
+
+                combined_score = (self.sentiment_combo_weight * decayed_score + 
+                                (1 - self.sentiment_combo_weight) * keyword_score)
+
+                fallback_sentiment = {
+                    "sentiment": "bullish" if combined_score > 0.1 else "bearish" if combined_score < -0.1 else "neutral",
+                    "score": combined_score,
+                    "confidence": 0.5,
+                    "enabled": True,
+                    "source": "hybrid_fallback"
+                }
+                sentiment_data[date_str] = fallback_sentiment
+    
+        # Update global cache with new sentiment data
+        global _sentiment_cache
+        _sentiment_cache = sentiment_data
+    
+        # Update module-level parameter cache
+        global _sentiment_params_cache
+        _sentiment_params_cache = {
+            'symbol': symbol,
+            'start_date': self.start_date,
+            'end_date': self.end_date,
+            'analysis_scope': self.analysis_scope,
+            'openai_api_frequency': self.openai_api_frequency,
+            'alpha_vantage_api_frequency': self.alpha_vantage_api_frequency,
+            'sentiment_decay_factor': self.sentiment_decay_factor,
+            'sentiment_combo_weight': self.sentiment_combo_weight,
+            'sentiment_confidence_threshold': self.sentiment_confidence_threshold,
+            'include_risk_analysis': self.include_risk_analysis,
+            'include_catalyst_analysis': self.include_catalyst_analysis
+        }
+    
+        logger.info(f"Cached sentiment data for entire session: {symbol} ({len(sentiment_data)} dates)")
+    
         return sentiment_data
 
-    def _slice_sentiment_data(self, sentiment_data: Dict[str, Any], start_date: str, end_date: str) -> Dict[str, Any]:
+    def use_cached_sentiment(self, symbol: str) -> bool:
+        """Check if we can use cached sentiment data based on parameter comparison"""
+        global _sentiment_cache, _sentiment_params_cache
+    
+        # Check if we have cached sentiment data and parameters
+        if not _sentiment_cache or _sentiment_params_cache is None:
+            return False
+
+        return (symbol == _sentiment_params_cache['symbol'] and 
+                self.start_date == _sentiment_params_cache['start_date'] and 
+                self.end_date == _sentiment_params_cache['end_date'] and 
+                self.analysis_scope == _sentiment_params_cache['analysis_scope'] and 
+                self.openai_api_frequency == _sentiment_params_cache['openai_api_frequency'] and 
+                self.alpha_vantage_api_frequency == _sentiment_params_cache['alpha_vantage_api_frequency'] and
+                self.sentiment_decay_factor == _sentiment_params_cache['sentiment_decay_factor'] and
+                self.sentiment_combo_weight == _sentiment_params_cache['sentiment_combo_weight'] and
+                self.sentiment_confidence_threshold == _sentiment_params_cache['sentiment_confidence_threshold'] and
+                self.include_risk_analysis == _sentiment_params_cache['include_risk_analysis'] and
+                self.include_catalyst_analysis == _sentiment_params_cache['include_catalyst_analysis'])
+
+    async def get_sentiment_data(self, symbol: str, trading_days) -> Dict[str, Any]:
         """
-        Slice sentiment data to match the specified date range.
-        
+        Get sentiment data with early decision logic.
+    
         Args:
-            sentiment_data: Full sentiment data dictionary (date -> sentiment_info)
-            start_date: Start date for slicing (YYYY-MM-DD)
-            end_date: End date for slicing (YYYY-MM-DD)
+            symbol: Stock symbol
+            trading_days: List of trading days
         
         Returns:
-            Sliced sentiment data for the specified period
+        Dictionary indexed by trading date (YYYY-MM-DD) -> sentiment info dict or None
         """
-        if not sentiment_data:
-            logger.warning(f"No sentiment data available for period {start_date} to {end_date}. Proceeding without sentiment.")
-            return sentiment_data
         
-        # Convert dates to datetime for comparison
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-        
-        # Filter sentiment data for the specified date range
-        sliced_sentiment = {}
-        for date_str, sentiment_info in sentiment_data.items():
-            date_dt = pd.to_datetime(date_str)
-            if start_dt <= date_dt <= end_dt:
-                sliced_sentiment[date_str] = sentiment_info
-        
-        # Log if no data found in the specified range
-        if not sliced_sentiment:
-            available_dates = list(sentiment_data.keys())[:5]  # Show first 5 dates
-            logger.warning(f"No sentiment data found in specified range {start_date} to {end_date}. Available dates: {available_dates}...")
-        
-        return sliced_sentiment
+        # Early decision: sentiment disabled
+        if not self.use_sentiment:
+            logger.info(f"Sentiment analysis disabled for {symbol}")
+            return {}
+    
+        # Early decision: can use cached sentiment
+        if self.use_cached_sentiment(symbol):
+            logger.info(f"Using cached sentiment data for entire session: {symbol}")
+            return _sentiment_cache
+    
+        # Only call _build_sentiment_data if sentiment is enabled AND cache is not available
+        logger.info(f"Building new sentiment data for entire session: {symbol}")
+        return await self._build_sentiment_data(symbol, trading_days)
 
     def _get_optimization_params(self) -> Dict[str, List]:
         """Get parameter ranges for optimization based on strategy and speed setting"""
@@ -358,7 +395,8 @@ class TradingModel(BaseModel):
             # Download data for the specified period
             # Suppress yfinance progress bar
             data = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
-            
+            trading_days = data.index  # Calculate trading days for the sliced period
+
             if data.empty:
                 return {"error": "No data available", "final_value": self.initial_capital}
             
@@ -373,7 +411,7 @@ class TradingModel(BaseModel):
             
             # Prepare strategy parameters
             strategy_params = params.copy()
-            # CRITICAL FIX: Always set use_sentiment parameter
+            # Always set use_sentiment parameter
             strategy_params['use_sentiment'] = use_sentiment
             
             # Handle sentiment data
@@ -386,13 +424,6 @@ class TradingModel(BaseModel):
             else:
                 # Technical-only
                 strategy_params['sentiment_data'] = {}
-
-            # Calculate trading days for the sliced period using NYSE calendar
-            market_calendar = mcal.get_calendar('NYSE')
-            trading_days = market_calendar.valid_days(
-            start_date=start_date,
-            end_date=end_date
-            )
 
             strategy_params['trading_days'] = trading_days
             strategy_class, final_params = get_trading_strategy(self.strategy, strategy_params)
@@ -442,77 +473,16 @@ class TradingModel(BaseModel):
         
         return " | ".join(display_parts)
 
-    async def get_sentiment_signal(self, symbol: str, date: str = None) -> Dict[str, Any]:
-        """LlamaIndex-powered sentiment analysis"""
-        logger.info(f"get_sentiment_signal called with use_sentiment={self.use_sentiment}, date={date}")
-        
-        if not self.use_sentiment:
-            logger.info("Sentiment analysis disabled, returning neutral")
-            return {
-                "sentiment": "neutral", 
-                "score": 0.0, 
-                "confidence": 0.0,
-                "enabled": False,
-                "source": "disabled"
-            }
-        
-        if not config.has_openai_key:
-            logger.warning("Sentiment analysis requested but OpenAI API key validation failed")
-            return {
-                "sentiment": "neutral", 
-                "score": 0.0, 
-                "confidence": 0.0,
-                "enabled": False,
-                "error": "OpenAI API key not valid or connection failed",
-                "source": "error"
-            }
-        
-        try:            
-            # Build knowledge base with date-specific context
-            if date:
-                logger.info(f"Building LlamaIndex knowledge base for {symbol} as of {date} (scope: {self.analysis_scope})")
-                await self._llama_engine.build_financial_knowledge_base(
-                    symbol=symbol, 
-                    scope=self.analysis_scope,
-                    days_back=30,
-                    analysis_date=date
-                )
-            else:
-                logger.error("analysis_date is required for temporal sentiment analysis")
-                raise ValueError("analysis_date parameter is required for temporal sentiment analysis")
-            
-            # Get sentiment data
-            sentiment_data = await self._llama_engine.get_sentiment_data(
-                symbol=symbol,
-                confidence_threshold=self.sentiment_confidence_threshold
-            )
-            
-            # Add risk analysis if requested
-            if self.include_risk_analysis and sentiment_data.get("enabled", False):
-                logger.info("Including risk factor analysis")
-                risk_analysis = await self._llama_engine.get_risk_analysis(symbol)
-                sentiment_data["risk_analysis"] = risk_analysis
-            
-            # Add catalyst analysis if requested
-            if self.include_catalyst_analysis and sentiment_data.get("enabled", False):
-                logger.info("Including catalyst analysis")
-                catalyst_analysis = await self._llama_engine.get_catalyst_analysis(symbol)
-                sentiment_data["catalyst_analysis"] = catalyst_analysis
-            
-            logger.info(f"LlamaIndex sentiment analysis completed: {sentiment_data.get('sentiment')} (score: {sentiment_data.get('score')})")
-            
-            return sentiment_data
-            
-        except Exception as e:
-            logger.error(f"LlamaIndex sentiment analysis error: {e}")
-            return {
-                "sentiment": "neutral", 
-                "score": 0.0, 
-                "confidence": 0.0,
-                "enabled": False,
-                "error": str(e),
-                "source": "error"
-            }
+    async def _get_keyword_sentiment(self, symbol: str, date: str = None, trading_day_index: int = None) -> Dict[str, Any]:
+        documents = await self._llama_engine.retrieve_documents(symbol, self.analysis_scope, date, days_back = 30, trading_day_index = trading_day_index, alpha_vantage_api_frequency = self.alpha_vantage_api_frequency)
+        enhanced_text = "\n\n".join([doc.text for doc in documents])
+        if not enhanced_text.strip():
+            logger.warning(f"No financial data retrieved for {symbol} on {date} - using generic placeholder for keyword sentiment analysis")
+            enhanced_text = f"Financial analysis for {symbol} on {date} - market sentiment and performance indicators"
+        keyword_result = self._llama_engine._get_keyword_sentiment(enhanced_text)
+
+        return keyword_result
+
 
     async def simulate(self, symbol: str) -> Dict[str, Any]:
         logger.info(f"Starting simulation for {symbol}")
@@ -522,20 +492,14 @@ class TradingModel(BaseModel):
         if self.use_sentiment and self._llama_engine is None:
             logger.info("Initializing LlamaEngine for sentiment analysis")
             self._llama_engine = QuantFinLlamaEngine()
-       
-        # Calculate all trading days using NYSE calendar
-        market_calendar = mcal.get_calendar('NYSE')
-        trading_days = market_calendar.valid_days(
-            start_date=self.start_date,
-            end_date=self.end_date
-        )
-
-        # Build sentiment data for the trading period
-        sentiment_data = await self._build_sentiment_data(symbol, trading_days)
 
         # Suppress yfinance progress bar
         data = yf.download(symbol, start=self.start_date, end=self.end_date, progress=False, auto_adjust=True)
-        
+        trading_days = data.index  # Calculate trading days for the period
+
+        # Build sentiment data for the trading period
+        sentiment_data = await self.get_sentiment_data(symbol, trading_days)
+
         # Fix: Flatten MultiIndex columns if they exist
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.droplevel(1)
@@ -574,26 +538,23 @@ class TradingModel(BaseModel):
             logger.info("Initializing LlamaEngine for sentiment analysis")
             self._llama_engine = QuantFinLlamaEngine()
 
-        # Calculate all trading days using NYSE calendar
-        market_calendar = mcal.get_calendar('NYSE')
-        trading_days = market_calendar.valid_days(
-            start_date=self.start_date,
-            end_date=self.end_date
-        )
+        # This data download will only be used by the "if not self.enable_optimization:" branch below, it is not placed under that branch
+        # because we need "trading_days = data.index", and "trading_days" will be used build sentiment_data, which will be used both by that branch, and also by the 
+        # Enhanced backtest with optimization below it. This download is estimated between 50k-100k, its not costing too much.
+        # Suppress yfinance progress bar
+        data = yf.download(symbol, start=self.start_date, end=self.end_date, progress=False, auto_adjust=True)
+        trading_days = data.index
+        
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.droplevel(1)
 
         # Build sentiment data for the trading period
-        sentiment_data = await self._build_sentiment_data(symbol, trading_days)
+        sentiment_data = await self.get_sentiment_data(symbol, trading_days)
 
         if not self.enable_optimization:
             # Simple backtest - use current parameters as-is
             logger.info("Running simple backtest with current parameters")
-            
-            # Suppress yfinance progress bar
-            data = yf.download(symbol, start=self.start_date, end=self.end_date, progress=False, auto_adjust=True)
-            
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.droplevel(1)
-            
+                        
             cerebro = bt.Cerebro()
             cerebro.broker.set_cash(self.initial_capital)
             datafeed = bt.feeds.PandasData(dataname=data)
@@ -623,11 +584,11 @@ class TradingModel(BaseModel):
         # Enhanced backtest with optimization
         logger.info("Running enhanced backtest with split-sample optimization")
         
-        # Step 2: Split data into training and testing periods
+        # Step 1: Split data into training and testing periods
         train_start, train_end, test_start, test_end = self._split_data_period()
         logger.info(f"Data split - Training: {train_start} to {train_end}, Testing: {test_start} to {test_end}")
         
-        # Step 3: Get parameter ranges for optimization
+        # Step 2: Get parameter ranges for optimization
         param_ranges = self._get_optimization_params()
         param_combinations = list(product(*param_ranges.values()))
         param_keys = list(param_ranges.keys())
@@ -639,7 +600,7 @@ class TradingModel(BaseModel):
             "technical_only": {"best_params": None, "best_return": -float('inf'), "all_results": []}
         }
         
-        # Step 4: Training phase optimization
+        # Step 3: Training phase optimization
         logger.info("Starting training phase optimization...")
         
         for i, combination in enumerate(param_combinations):
@@ -650,7 +611,10 @@ class TradingModel(BaseModel):
             
             # Test sentiment version
             if self.compare_sentiment_versions:
-                params['sentiment_data'] = sentiment_data  # Add sentiment data
+                # Add sentiment data, it is the data over the whole trading period, each _run_single_bracket call will use only a subset 
+                # of this data, dilimited by its start and end date parameters, and accessed by each trading date within that date ranges
+                # inside the next() method of the trading strategy
+                params['sentiment_data'] = sentiment_data 
                 result = await self._run_single_backtest(symbol, train_start, train_end, params, True)
                 if "error" not in result:
                     optimization_results["sentiment_version"]["all_results"].append(result)
@@ -669,7 +633,7 @@ class TradingModel(BaseModel):
         
         logger.info("Training phase completed. Starting out-of-sample testing...")
         
-        # Step 5: Out-of-sample testing with best parameters
+        # Step 4: Out-of-sample testing with best parameters
         test_results = {}
         
         if self.compare_sentiment_versions and optimization_results["sentiment_version"]["best_params"]:
@@ -686,7 +650,7 @@ class TradingModel(BaseModel):
                 optimization_results["technical_only"]["best_params"], False
             )
         
-        # Step 6: Format user-friendly parameter displays
+        # Step 5: Format user-friendly parameter displays
         sentiment_params_display = self._format_parameters_display(optimization_results["sentiment_version"]["best_params"])
         technical_params_display = self._format_parameters_display(optimization_results["technical_only"]["best_params"])
         
@@ -700,7 +664,7 @@ class TradingModel(BaseModel):
         recommended_approach = "Sentiment-enhanced" if sentiment_better else "Technical-only"
         recommended_params = sentiment_params_display if sentiment_better else technical_params_display
         
-        # Step 7: Compile comprehensive results with flattened structure
+        # Step 6: Compile comprehensive results with flattened structure
         return {
             "methodology": "Split-Sample Optimization",
             "strategy": self.strategy,
@@ -759,8 +723,8 @@ class TradingModel(BaseModel):
                         "return_pct": f"{test_results.get('technical_only', {}).get('return_pct', 0):.2f}%"
                     } if "technical_only" in test_results else "N/A"
                 },
-                "sentiment_analysis": sentiment_data
             },
-            
+            "sentiment_analysis": sentiment_data,
+
             "message": f"Enhanced backtesting completed with {len(param_combinations)} parameter combinations tested"
         }

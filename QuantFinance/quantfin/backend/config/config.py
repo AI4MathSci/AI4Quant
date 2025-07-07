@@ -99,6 +99,7 @@ class Settings(BaseSettings):
 
 # Create a single instance of the settings
 config = Settings()
+full_sentiment_analysis = config.has_openai_key # Boolean to indciate whether using full sentiment analysis (OpenAI API is configured)
 
 # Log the loaded credentials (without exposing sensitive values)
 logger.info("Credentials loaded:")

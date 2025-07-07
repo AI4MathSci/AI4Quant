@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 # API Configuration
 API_BASE_URL = "http://localhost:8000"
 
+# Load environment variables for API frequency controls with fallback defaults
+OPENAI_API_FREQUENCY_MAX = int(os.getenv('OPENAI_API_FREQUENCY_MAX', 60))
+OPENAI_API_FREQUENCY_DEFAULT = int(os.getenv('OPENAI_API_FREQUENCY_DEFAULT', 60))
+ALPHA_VANTAGE_API_FREQUENCY_MAX = int(os.getenv('ALPHA_VANTAGE_API_FREQUENCY_MAX', 60))
+ALPHA_VANTAGE_API_FREQUENCY_DEFAULT = int(os.getenv('ALPHA_VANTAGE_API_FREQUENCY_DEFAULT', 30))
+
 def is_valid_symbol(symbol):
     """Validate if the symbol exists in yfinance"""
     logger.info(f"Validating symbol: {symbol}")
@@ -48,7 +54,7 @@ def format_api_status(configured):
     if configured:
         return "✅ OpenAI API Key: Configured"
     else:
-        return "❌ OpenAI API Key: Not Configured (Sentiment analysis disabled)"
+        return "⚠️ OpenAI API Key: Not Configured (Sentiment analysis will be keyword-based only)"
 
 # Trading Interface
 def trading_interface():
@@ -264,13 +270,22 @@ def trading_interface():
                     
                     # Sentiment API Call Controls
                     with gr.Row():
-                        sentiment_api_frequency = gr.Slider(
-                            label="Sentiment API Frequency",
+                        openai_api_frequency = gr.Slider(
+                            label="OpenAI API Frequency",
                             minimum=1,
-                            maximum=60,
-                            value=60,
+                            maximum=OPENAI_API_FREQUENCY_MAX,
+                            value=OPENAI_API_FREQUENCY_DEFAULT,
                             step=1,
-                            info="Call sentiment API every N trading days (higher = fewer API calls, lower cost)"
+                            info="Call OpenAI API every N trading days (higher = fewer API calls, lower cost)"
+                        )
+                        
+                        alpha_vantage_api_frequency = gr.Slider(
+                            label="Alpha Vantage API Frequency",
+                            minimum=1,
+                            maximum=ALPHA_VANTAGE_API_FREQUENCY_MAX,
+                            value=ALPHA_VANTAGE_API_FREQUENCY_DEFAULT,
+                            step=1,
+                            info="Call Alpha Vantage API every N trading days (higher = fewer API calls, lower cost)"
                         )
                         
                         sentiment_decay_factor = gr.Slider(
@@ -790,7 +805,8 @@ Please review the error message and adjust your settings accordingly.
                                 sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                                 bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                                 analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
-                                sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight):
+                                openai_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                                alpha_vantage_api_frequency):
             logger.info(f"Running simulation for {symbol} with strategy {strategy}")
             if not is_valid_symbol(symbol):
                 return {"error": "Invalid stock symbol"}
@@ -815,10 +831,11 @@ Please review the error message and adjust your settings accordingly.
                     "sentiment_confidence_threshold": sentiment_confidence_threshold,
                     "include_risk_analysis": include_risk_analysis,
                     "include_catalyst_analysis": include_catalyst_analysis,
-                    # Sentiment API call parameters
-                    "sentiment_api_frequency": sentiment_api_frequency,
+                    # API call parameters
+                    "openai_api_frequency": openai_api_frequency,
                     "sentiment_decay_factor": sentiment_decay_factor,
-                    "sentiment_combo_weight": sentiment_combo_weight
+                    "sentiment_combo_weight": sentiment_combo_weight,
+                    "alpha_vantage_api_frequency": alpha_vantage_api_frequency
                 }
                 
                 logger.info(f"Sending simulation request to {API_BASE_URL}/trading/simulate/{symbol}")
@@ -849,7 +866,8 @@ Please review the error message and adjust your settings accordingly.
                                 sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                                 bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                                 analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
-                                sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                                openai_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                                alpha_vantage_api_frequency,
                                 enable_optimization, optimization_split_ratio, compare_sentiment_versions, 
                                 optimization_speed, max_combinations):
             logger.info(f"Running backtest for {symbol} with strategy {strategy}")
@@ -904,9 +922,10 @@ Please review the error message and adjust your settings accordingly.
                     "include_risk_analysis": include_risk_analysis,
                     "include_catalyst_analysis": include_catalyst_analysis,
                     # Sentiment API call parameters
-                    "sentiment_api_frequency": sentiment_api_frequency,
+                    "openai_api_frequency": openai_api_frequency,
                     "sentiment_decay_factor": sentiment_decay_factor,
                     "sentiment_combo_weight": sentiment_combo_weight,
+                    "alpha_vantage_api_frequency": alpha_vantage_api_frequency,                    
                     # Optimization parameters
                     "enable_optimization": enable_optimization,
                     "optimization_split_ratio": optimization_split_ratio,
@@ -993,7 +1012,8 @@ Please review the error message and adjust your settings accordingly.
                    sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                    bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                    analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
-                   sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight],
+                   openai_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                   alpha_vantage_api_frequency],
             outputs=[simulation_summary, simulation_performance, simulation_output]
         )
         
@@ -1003,7 +1023,8 @@ Please review the error message and adjust your settings accordingly.
                    sma_window, rsi_period, rsi_overbought, rsi_oversold, 
                    bb_period, bb_dev, use_sentiment, sentiment_weight, sentiment_threshold,
                    analysis_scope, sentiment_confidence_threshold, include_risk_analysis, include_catalyst_analysis,
-                   sentiment_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                   openai_api_frequency, sentiment_decay_factor, sentiment_combo_weight,
+                   alpha_vantage_api_frequency,
                    enable_optimization, optimization_split_ratio, compare_sentiment_versions, 
                    optimization_speed, max_combinations],
             outputs=[optimization_summary, performance_summary, backtest_output]
