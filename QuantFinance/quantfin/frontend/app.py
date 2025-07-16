@@ -5,6 +5,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import os
 import logging
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -13,11 +14,25 @@ logger = logging.getLogger(__name__)
 # API Configuration
 API_BASE_URL = "http://localhost:8000"
 
+# Load .env file
+env_path = os.path.join(os.getcwd(), '.env')
+logger.info(f"Loading .env file from: {env_path}")
+load_dotenv(env_path)
+
 # Load environment variables for API frequency controls with fallback defaults
 OPENAI_API_FREQUENCY_MAX = int(os.getenv('OPENAI_API_FREQUENCY_MAX', 60))
 OPENAI_API_FREQUENCY_DEFAULT = int(os.getenv('OPENAI_API_FREQUENCY_DEFAULT', 60))
 ALPHA_VANTAGE_API_FREQUENCY_MAX = int(os.getenv('ALPHA_VANTAGE_API_FREQUENCY_MAX', 60))
 ALPHA_VANTAGE_API_FREQUENCY_DEFAULT = int(os.getenv('ALPHA_VANTAGE_API_FREQUENCY_DEFAULT', 30))
+
+# Import sentiment configuration
+from quantfin.backend.config.config import (
+    SENTIMENT_CLASSIFICATION_THRESHOLD,
+    SENTIMENT_CONFIDENCE_THRESHOLD, 
+    SENTIMENT_DECAY_FACTOR,
+    SENTIMENT_COMBO_WEIGHT,
+    SENTIMENT_WEIGHT_DEFAULT
+)
 
 def is_valid_symbol(symbol):
     """Validate if the symbol exists in yfinance"""
@@ -54,7 +69,7 @@ def format_api_status(configured):
     if configured:
         return "✅ OpenAI API Key: Configured"
     else:
-        return "⚠️ OpenAI API Key: Not Configured (Sentiment analysis will be keyword-based only)"
+        return "⚠️ OpenAI API Key: Not Configured (Sentiment analysis will be using FinBert and keyword-based methods)"
 
 # Trading Interface
 def trading_interface():
@@ -221,7 +236,7 @@ def trading_interface():
                         label="Sentiment Weight (0 = ignore, 1 = full weight)",
                         minimum=0.0,
                         maximum=1.0,
-                        value=0.3,
+                        value=SENTIMENT_WEIGHT_DEFAULT,
                         step=0.1
                     )
                     
@@ -229,7 +244,7 @@ def trading_interface():
                         label="Sentiment Threshold (minimum strength to trigger)",
                         minimum=0.0,
                         maximum=0.5,
-                        value=0.1,
+                        value=SENTIMENT_CLASSIFICATION_THRESHOLD,
                         step=0.05
                     )
                     
@@ -245,7 +260,7 @@ def trading_interface():
                         label="Confidence Threshold (minimum confidence to act)",
                         minimum=0.0,
                         maximum=1.0,
-                        value=0.5,
+                        value=SENTIMENT_CONFIDENCE_THRESHOLD,
                         step=0.1
                     )
                     
@@ -292,7 +307,7 @@ def trading_interface():
                             label="Sentiment Decay Factor",
                             minimum=0.7,
                             maximum=0.99,
-                            value=0.9,
+                            value=SENTIMENT_DECAY_FACTOR,
                             step=0.01,
                             info="How quickly sentiment decays between API calls (0.9 = 10% decay per day)"
                         )
@@ -301,7 +316,7 @@ def trading_interface():
                             label="Sentiment Combo Weight",
                             minimum=0.0,
                             maximum=1.0,
-                            value=0.5,
+                            value=SENTIMENT_COMBO_WEIGHT,
                             step=0.1,
                             info="Weight for combining decayed API sentiment with keyword sentiment (0.5 = equal weight)"
                         )

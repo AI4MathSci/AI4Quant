@@ -112,22 +112,33 @@ class QuantFinLlamaEngine:
             raise
     
     async def get_sentiment_data(self, symbol: str, confidence_threshold: float = 0.5) -> Dict[str, Any]:
-        """Get comprehensive sentiment analysis"""
-        if not self.query_engine:
-            return self._fallback_sentiment("No knowledge base available")
-        
+        """Get comprehensive sentiment analysis"""        
         try:
             # Construct intelligent sentiment query
             sentiment_query = f"""
             Analyze the overall market sentiment and outlook for {symbol} based on available information.
-            
-            Please provide:
-            1. Overall sentiment (bullish/bearish/neutral)
-            2. Confidence level (0-1 scale)
-            3. Key supporting factors
-            4. Main concerns or risks
-            5. Short-term vs long-term outlook
-            
+            Classify the overall sentiment as one of the following exact categories:
+            - "bullish"
+            - "bearish"
+            - "neutral"
+
+            **Instructions:**
+            - Only use one of the above-mentioned labels for the "sentiment" field.
+            - Do NOT use any modifiers or qualifiers such as "somewhat", "very", "slightly", "strong", etc. in the sentiment label.
+            - If you wish to indicate the strength of the sentiment, use the "score" field, do not modify the sentiment label itself. 
+            - Provide a sentiment score between -1.0 and 1.0, with -1.0 being the most bearish sentiment, 0.0 as neutral, and 1.0 as the most bullish sentiment.
+            - Provie a confidence score between 0 and 1 indicating how confident you are in this classification.
+
+            Return the result strictly in this JSON format:
+            {{
+                sentiment: <bearish|bullish|neutral>,
+                score: <float between -1.0 and 1.0>,
+                confidence: <float between 0 and 1>
+                Key supporting factors: <str>
+                Main concerns or risk": <str>
+                Short-term vs long-term outloolk: <str>
+            }}
+                        
             Focus on recent developments, market conditions, and fundamental factors.
             Be specific and cite key information from the documents.
             """
@@ -148,17 +159,26 @@ class QuantFinLlamaEngine:
                 "sentiment": sentiment_analysis["sentiment"],
                 "score": sentiment_analysis["score"],
                 "confidence": sentiment_analysis["confidence"],
-                "enabled": True,
+                "enabled": sentiment_analysis["enabled"],
                 "reasoning": sentiment_analysis.get("reasoning", ""),
                 "key_factors": sentiment_analysis.get("key_factors", []),
                 "concerns": sentiment_analysis.get("concerns", []),
                 "outlook": sentiment_analysis.get("outlook", "neutral"),
-                "source_count": self.document_count
+                "source_count": self.document_count,
+                "source": sentiment_analysis.get("source", "llamaindex"),
+                "error": sentiment_analysis.get("error", None)
             }
             
         except Exception as e:
             logger.error(f"Sentiment analysis error: {e}")
-            return self._fallback_sentiment(str(e))
+            return {
+                "enabled": False,
+                "error": str(e),
+                "source": "llamaindex",
+                "sentiment": "neutral",
+                "score": 0.0,
+                "confidence": 0.0
+            }            
     
     async def get_risk_analysis(self, symbol: str) -> Dict[str, Any]:
         """Get comprehensive risk analysis"""
@@ -211,57 +231,28 @@ class QuantFinLlamaEngine:
         except Exception as e:
             logger.error(f"Catalyst analysis error: {e}")
             return {"catalysts": [], "error": str(e)}
-    
-    def _fallback_sentiment(self, error_msg: str) -> Dict[str, Any]:
-        """Fallback sentiment when analysis fails"""
-        return {
-            "sentiment": "neutral",
-            "score": 0.0,
-            "confidence": 0.0,
-            "enabled": False,
-            "reasoning": f"Analysis unavailable: {error_msg}",
-            "error": error_msg,
-            "source_count": 0
-        }
-    
-    def _get_keyword_sentiment(self, text: str) -> Dict[str, Any]:
-        """Get sentiment using keyword-based method"""
-        text_lower = text.lower()
 
-        # Enhanced financial keywords
-        bullish_indicators = [
-            "bullish", "positive", "optimistic", "strong outlook", "growth potential", 
-            "buy", "uptrend", "earnings beat", "revenue growth", "market leader",
-            "innovation", "expansion", "partnership", "upgrade", "buy rating",
-            "strong performance", "outperform", "beat expectations"
-        ]
-        bearish_indicators = [
-            "bearish", "negative", "pessimistic", "weak outlook", "declining", 
-            "sell", "downtrend", "earnings miss", "revenue decline", "market share loss",
-            "downgrade", "sell rating", "layoffs", "bankruptcy", "regulatory issues",
-            "weak performance", "underperform", "miss expectations"
-        ]
+
+    def calculate_score_from_sentiment(self, sentiment: str, confidence: float) -> float:
+        """
+        Calculate sentiment score based on sentiment category and confidence level.
+    
+        Args:
+            sentiment: Sentiment category ("bullish", "bearish", or "neutral")
+            confidence: Confidence level (0.0 to 1.0)
         
-        bullish_score = sum(1 for indicator in bullish_indicators if indicator in text_lower)
-        bearish_score = sum(1 for indicator in bearish_indicators if indicator in text_lower)
-        
-        if bullish_score > bearish_score:
-            sentiment = "bullish"
-            score = min(0.8, 0.3 + (bullish_score - bearish_score) * 0.1)
-        elif bearish_score > bullish_score:
-            sentiment = "bearish" 
-            score = max(-0.8, -0.3 - (bearish_score - bullish_score) * 0.1)
-        else:
-            sentiment = "neutral"
+        Returns:
+            Calculated score between -1.0 and 1.0
+        """
+        if sentiment == "bullish":
+            score = min(0.8, 0.3 + confidence * 0.5)
+        elif sentiment == "bearish":
+            score = max(-0.8, -0.3 - confidence * 0.5)
+        else:  # neutral
             score = 0.0
-        
-        confidence = min(0.9, 0.4 + len(text.split()) / 1000)
-        
-        return {
-            "sentiment": sentiment,
-            "score": score,
-            "confidence": confidence
-        }
+    
+        return score    
+
 
     # Parsing methods (enhanced but still simplified)
     async def _parse_llm_sentiment(self, response: str) -> Dict[str, Any]:
@@ -271,15 +262,14 @@ class QuantFinLlamaEngine:
         # First, check for sentiment statements from the LLM
         sentiment = None
         confidence = 0.7  # Default confidence for statements
-        
-        # Look for overall sentiment declarations
-        if "overall sentiment: bullish" in response_lower or "sentiment: bullish" in response_lower:
+        # Look for sentiment declarations        
+        if "sentiment: \"bullish\"" in response_lower:
             sentiment = "bullish"
-        elif "overall sentiment: bearish" in response_lower or "sentiment: bearish" in response_lower:
+        elif "sentiment: \"bearish\"" in response_lower:
             sentiment = "bearish"
-        elif "overall sentiment: neutral" in response_lower or "sentiment: neutral" in response_lower:
+        elif "sentiment: \"neutral\"" in response_lower:
             sentiment = "neutral"
-        
+ 
         # Look for confidence level in the response
         confidence_match = re.search(r'confidence[:\s]*([0-9]*\.?[0-9]+)', response_lower)
         if confidence_match:
@@ -290,31 +280,48 @@ class QuantFinLlamaEngine:
                     confidence = confidence / 100
             except:
                 pass
-        
-        # If we found sentiment, calculate score
-        if sentiment:
-            if sentiment == "bullish":
-                score = min(0.8, 0.3 + confidence * 0.5)
-            elif sentiment == "bearish":
-                score = max(-0.8, -0.3 - confidence * 0.5)
-            else:  # neutral
-                score = 0.0
+ 
+        # Look for sentiment score in the response
+        score_match = re.search(r'score[:\s]*([+-]?[0-9]*\.?[0-9]+)', response_lower)
+        if score_match:
+            try:
+                # Use LLM's provided score
+                score = float(score_match.group(1))
+                # Clamp to valid range
+                score = max(-1.0, min(1.0, score))
+            except ValueError:
+                # Fallback to calculated score
+                score = self.calculate_score_from_sentiment(sentiment, confidence)
+                logger.info(f"LLM score parsing failed, using calculated score: {score}")
         else:
-            # Fallback to keyword-based sentiment detection
-            keyword_result = self._get_keyword_sentiment(response_lower)
-            sentiment = keyword_result["sentiment"]
-            score = keyword_result["score"]
-            confidence = keyword_result["confidence"]
-        
-        return {
-            "sentiment": sentiment,
-            "score": score,
-            "confidence": confidence,
-            "reasoning": response[:400],  # First 400 chars
-            "key_factors": [],
-            "concerns": [],
-            "outlook": sentiment
+            # No score found, use calculated score
+            score = self.calculate_score_from_sentiment(sentiment, confidence)
+            logger.info(f"No LLM score found, using calculated score: {score}")
+
+        # If we found sentiment
+        if sentiment:
+            return {
+                "sentiment": sentiment,
+                "score": score,
+                "confidence": confidence,
+                "reasoning": response[:400],  # First 400 chars
+                "key_factors": [],
+                "concerns": [],
+                "outlook": sentiment,
+                "enabled": True,
+                "source": "llamaindex"
         }
+
+        else:
+        # LLM parsing failed - return disabled state
+            return {
+                "sentiment": "neutral",
+                "score": 0.0,
+                "confidence": 0.0,
+                "reasoning": "LLM response parsing failed",
+                "enabled": False,
+                "source": "llamaindex_failed"
+            }        
     
     async def _parse_risk_analysis(self, response: str) -> Dict[str, Any]:
         """Parse risk analysis response"""

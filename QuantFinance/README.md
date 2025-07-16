@@ -16,6 +16,8 @@ A comprehensive quantitative finance platform with **AI-powered sentiment analys
 - **Trading days alignment** using Yahoo finance market data's calendar for accurate market timing
 - **Global sentiment caching** for efficient optimization
 - **LLM-driven sentiment parsing** with confidence scoring
+- **FinBERT transformer-based sentiment fallback and hybrid scoring**
+- **Keyword analyzer as final fallback**
 - **Risk factor and catalyst analysis**
 
 ### 🎯 **Professional Parameter Optimization**
@@ -55,6 +57,7 @@ This project is built on top of exceptional open-source libraries. We give full 
 ### **🧠 AI & Document Processing**
 - **[LlamaIndex](https://github.com/run-llama/llama_index)** - Advanced LLM-powered document processing and RAG framework
 - **[OpenAI](https://github.com/openai/openai-python)** - OpenAI Python client for GPT-4 integration
+- **[FinBERT](https://github.com/ProsusAI/finBERT)** – Pretrained transformer model for financial sentiment analysis (used as a fallback and for hybrid sentiment scoring)
 
 ### **📡 Data & Web Services**
 - **[FastAPI](https://github.com/tiangolo/fastapi)** - Modern, high-performance web framework for APIs
@@ -74,6 +77,7 @@ This project is built on top of exceptional open-source libraries. We give full 
 - **[uv](https://github.com/astral-sh/uv)** - Fast Python package manager
 - **Internet connection** (for real-time data and sentiment analysis)
 
+**Note:** FinBERT is included and used automatically for sentiment analysis fallback and hybrid scoring. No special setup is required.
 
 ## 🏗️ System Architecture
 
@@ -81,22 +85,31 @@ This project is built on top of exceptional open-source libraries. We give full 
 QuantFinance/
 ├── quantfin/
 │   ├── backend/
-│   │   ├── models/                             # Core business logic
+│   │   ├── models/
 │   │   │   ├── trading_model.py                # Enhanced trading with temporal sentiment optimization
 │   │   │   ├── portfolio_model.py              # Portfolio management
-│   │   │   └── risk_model.py                   # Risk analysis
-│   │   ├── analysis/                           # AI-powered sentiment analysis
+│   │   │   ├── risk_model.py                   # Risk analysis
+│   │   │   └── __init__.py
+│   │   ├── analysis/
+│   │   │   ├── finbert_analyzer.py             # FinBERT-based sentiment analysis
+│   │   │   ├── keyword_analyzer.py             # Keyword-based fallback sentiment analysis
 │   │   │   └── llamaindex_engine.py            # LlamaIndex integration for document processing
-│   │   ├── strategies/                         # Strategies implementation
+│   │   ├── strategies/
 │   │   │   ├── trading_strategy_factory.py     # Algorithmic trading strategies with sentiment integration
 │   │   │   ├── portfolio_strategy_factory.py   # Portfolio management strategies
-│   │   │   └── risk_strategy_factory.py        # Risk management strategies
-│   │   ├── config/                             # Configuration management
-│   │   │   └── config.py                       # Application configuration settings
+│   │   │   ├── risk_strategy_factory.py        # Risk management strategies
+│   │   │   └── __init__.py
+│   │   ├── config/
+│   │   │   ├── config.py                       # Application configuration settings
+│   │   │   └── __init__.py
 │   │   ├── main.py                             # FastAPI server
+│   │   └── __init__.py
 │   ├── frontend/
-│   │   └── app.py                              # Enhanced Gradio interface with sentiment controls
-│   └── .env (.env.template)                    # Environment variables and API keys
+│   │   ├── app.py                              # Enhanced Gradio interface with sentiment controls
+│   │   └── __init__.py
+│   └── __init__.py
+├── .env.template                               # Environment variable template (copy to .env for local config)
+├── .env                                        # (gitignored) Local environment variables and API keys
 ├── pyproject.toml                              # Project dependencies and build configuration
 └── README.md                                   # This documentation
 ```
@@ -178,7 +191,7 @@ ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
 
 # Variables to determine the frequency of API calls (in number of trading days two consecutive API calls are apart from each other)
 OPENAI_API_FREQUENCY_MAX=60
-OPENAI_API_FREQUENCY_DEFAULT=60
+OPENAI_API_FREQUENCY_DEFAULT=30
 ALPHA_VANTAGE_API_FREQUENCY_MAX=60
 ALPHA_VANTAGE_API_FREQUENCY_DEFAULT=30
 
@@ -257,6 +270,8 @@ Our **split-sample optimization** provides professional-grade parameter tuning:
 - **Catalyst Analysis**: Potential positive/negative price drivers
 - **Confidence Thresholds**: Minimum confidence for sentiment signals
 - **Weight Configuration**: Balance between sentiment and technical signals
+- **Hybrid Sentiment Engine**: Combines LLM-based (OpenAI) and FinBERT transformer-based sentiment analysis for robust, fallback, and hybrid scoring
+- **Keyword Analyzer**: Used as a final fallback if both LLM and FinBERT are unavailable
 
 #### **Performance Optimizations**
 - **Temporal alignment**: Date-specific sentiment analysis for historical accuracy
@@ -312,6 +327,7 @@ Our **split-sample optimization** provides professional-grade parameter tuning:
 3. Choose analysis scope (Comprehensive recommended)
 4. Set sentiment weight and API frequency controls
 5. Enable risk/catalyst analysis for deeper insights
+6. **If OpenAI API is not configured, the system will automatically use FinBERT for sentiment analysis. If FinBERT is unavailable, a keyword-based analyzer will be used as a final fallback.**
 
 ### 📊 **Sentiment Window Scheme**
 

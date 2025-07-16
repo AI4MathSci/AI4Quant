@@ -10,7 +10,17 @@ from itertools import product
 
 from quantfin.backend.strategies.trading_strategy_factory import get_trading_strategy
 from quantfin.backend.config.config import full_sentiment_analysis
+from quantfin.backend.config.config import (
+    SENTIMENT_CLASSIFICATION_THRESHOLD, 
+    SENTIMENT_CONFIDENCE_THRESHOLD,
+    SENTIMENT_DECAY_FACTOR,
+    SENTIMENT_COMBO_WEIGHT,
+    SENTIMENT_WEIGHT_DEFAULT
+)
 from quantfin.backend.analysis.llamaindex_engine import QuantFinLlamaEngine
+from quantfin.backend.analysis.finbert_analyzer import FinBERTAnalyzer
+from quantfin.backend.analysis.keyword_analyzer import KeywordAnalyzer
+
 
 
 logger = logging.getLogger(__name__)
@@ -48,20 +58,20 @@ class TradingModel(BaseModel):
     
     # Simplified Sentiment Parameters (LlamaIndex Only)
     use_sentiment: bool = False
-    sentiment_weight: float = 0.3
-    sentiment_threshold: float = 0.1
+    sentiment_weight: float = SENTIMENT_WEIGHT_DEFAULT
+    sentiment_threshold: float = SENTIMENT_CLASSIFICATION_THRESHOLD
     
     # LlamaIndex Analysis Controls
     analysis_scope: str = "news"  # "news", "comprehensive", "filings"
     include_risk_analysis: bool = False
     include_catalyst_analysis: bool = False
-    sentiment_confidence_threshold: float = 0.5
+    sentiment_confidence_threshold: float = SENTIMENT_CONFIDENCE_THRESHOLD
     
     # Sentiment API Call Controls
     openai_api_frequency: int = 5  # Call OpenAI API every N trading days
     alpha_vantage_api_frequency: int = 10  # Call Alpha Vantage API every N trading days
-    sentiment_decay_factor: float = 0.9  # Decay factor for sentiment over time
-    sentiment_combo_weight: float = 0.5  # Weight for combining decayed and keyword-based sentiment (0.5 = equal weight)
+    sentiment_decay_factor: float = SENTIMENT_DECAY_FACTOR
+    sentiment_combo_weight: float = SENTIMENT_COMBO_WEIGHT
     
     # New Optimization Controls
     enable_optimization: bool = True
@@ -70,13 +80,96 @@ class TradingModel(BaseModel):
     optimization_speed: str = "fast"  # "fast", "balanced", "thorough"
     max_combinations: int = 400
     
-    # Instance-level engine
+    # Instance-level sentiment analyzers 
     _llama_engine: Optional[QuantFinLlamaEngine] = None
-    
+    _finbert_analyzer: Optional[FinBERTAnalyzer] = None
+    _keyword_analyzer: Optional[KeywordAnalyzer] = None
+
     class Config:
         # Allow private attributes in Pydantic model
         arbitrary_types_allowed = True
 
+    async def finbert_and_keyword_sentiment(self, symbol: str, date_str: str, trading_day_index: int) -> Dict[str, Any]:
+        #Try FinBERT fallback, then keyword analyzer if FinBERT fails
+
+        # Check if llama_engine is available
+        if self._llama_engine is None:
+            logger.error("LlamaEngine not initialized for document retrieval")
+            return {
+                "sentiment": "neutral",
+                "score": 0.0,
+                "confidence": 0.0,
+                "enabled": False,
+                "source": "fallback_neutral",
+                "error": "LlamaEngine not initialized"
+            }
+
+        try:
+            # Get documents for FinBERT
+            documents = await self._llama_engine.retrieve_documents(
+                symbol, self.analysis_scope, date_str, 
+                days_back=30, trading_day_index=trading_day_index, 
+                alpha_vantage_api_frequency=self.alpha_vantage_api_frequency
+            )
+            text = "\n\n".join([doc.text for doc in documents])
+
+            # Handle empty documents
+            if not documents:
+                logger.warning(f"No documents retrieved for {symbol} on {date_str}")
+                return {
+                    "sentiment": "neutral",
+                    "score": 0.0,
+                    "confidence": 0.0,
+                    "enabled": False,
+                    "source": "fallback_neutral",
+                    "error": f"No documents retrieved for {symbol} on {date_str}"
+                }
+            else:
+                text = "\n\n".join([doc.text for doc in documents])
+
+            if not text.strip():
+                return {
+                    "sentiment": "neutral",
+                    "score": 0.0,
+                    "confidence": 0.0,
+                    "enabled": False,
+                    "source": "fallback_neutral",
+                    "error": f"Retrieved documents for {symbol} on {date_str} contains no actual text"
+                }
+
+            # Try FinBERT first
+            try:
+                sentiment_result = self._finbert_analyzer.analyze_sentiment(text, self.sentiment_confidence_threshold)
+                logger.info(f"Using FinBERT sentiment analysis for {symbol}")
+                return sentiment_result        
+            except Exception as e:
+                logger.warning(f"FinBERT failed: {e}")
+                # Ultimate fallback: keyword analyzer
+                try:
+                    sentiment_result = self._keyword_analyzer.analyze_sentiment(text, self.sentiment_confidence_threshold)
+                    logger.info(f"Using keyword sentiment analysis for {symbol}")
+                    return sentiment_result
+                except Exception as e2:
+                    logger.error(f"All analyzers failed: {e2}")
+                    return {
+                        "sentiment": "neutral",
+                        "score": 0.0,
+                        "confidence": 0.0,
+                        "enabled": False,
+                        "source": "fallback_neutral",
+                        "error": f"All analyzers failed: {e2}"
+                    }
+        except Exception as e:
+            logger.error(f"Document retrieval failed: {e}")
+            return {
+                "sentiment": "neutral",
+                "score": 0.0,
+                "confidence": 0.0,
+                "enabled": False,
+                "source": "fallback_neutral",
+                "error": f"Document retrieval and all analyzers failed: {e}"
+            }
+    
     async def _build_sentiment_data(self, symbol: str, trading_days) -> Dict[str, Any]:
         """
         Build sentiment data dictionary for a given symbol and trading period 
@@ -100,7 +193,7 @@ class TradingModel(BaseModel):
         for i, trading_day in enumerate(trading_days):
             date_str = trading_day.strftime('%Y-%m-%d')
             if full_sentiment_analysis and i % self.openai_api_frequency == 0:
-                # Open AI API call day
+                # Open AI API call day, try LlamaIndex + OpenAI first
                 logger.info(f"Building LlamaIndex knowledge base for {symbol} as of {date_str} (scope: {self.analysis_scope})")
             
                 try:
@@ -119,38 +212,35 @@ class TradingModel(BaseModel):
                         symbol=symbol,
                         confidence_threshold=self.sentiment_confidence_threshold
                     )
-                
-                    # Add optional analyses
-                    if self.include_risk_analysis and sentiment_result.get("enabled", False):
-                        logger.info("Including risk factor analysis")
-                        risk_analysis = await self._llama_engine.get_risk_analysis(symbol)
-                        sentiment_result["risk_analysis"] = risk_analysis
+
+                    # Check if LlamaIndex succeeded
+                    if sentiment_result.get("enabled", False):
+                        # Add optional analyses
+                        if self.include_risk_analysis and sentiment_result.get("enabled", False):
+                            logger.info("Including risk factor analysis")
+                            risk_analysis = await self._llama_engine.get_risk_analysis(symbol)
+                            sentiment_result["risk_analysis"] = risk_analysis
                     
-                    if self.include_catalyst_analysis and sentiment_result.get("enabled", False):
-                        logger.info("Including catalyst analysis")
-                        catalyst_analysis = await self._llama_engine.get_catalyst_analysis(symbol)
-                        sentiment_result["catalyst_analysis"] = catalyst_analysis
+                        if self.include_catalyst_analysis and sentiment_result.get("enabled", False):
+                            logger.info("Including catalyst analysis")
+                            catalyst_analysis = await self._llama_engine.get_catalyst_analysis(symbol)
+                            sentiment_result["catalyst_analysis"] = catalyst_analysis
+                    else:
+                        # LlamaIndex failed - try FinBERT
+                        logger.info(f"LlamaIndex failed: {sentiment_result.get('error', 'Unknown error')}")
+                        sentiment_result = await self.finbert_and_keyword_sentiment(symbol, date_str, i)
                 
                     sentiment_data[date_str] = sentiment_result
                     last_sentiment = sentiment_result
                     last_sentiment_date = trading_day
-                
+
                 except Exception as e:
+                    # Try FinBERT fallback
                     logger.error(f"LlamaIndex sentiment analysis error: {e}")
-                    # Fallback to keyword sentiment
-                    keyword_result = await self._get_keyword_sentiment(symbol, date_str, i)
-                    sentiment_data[date_str] = {
-                        "sentiment": keyword_result["sentiment"],
-                        "score": keyword_result["score"],
-                        "confidence": keyword_result["confidence"],
-                        "enabled": True,
-                        "source": "keyword_analysis",
-                        "reasoning": f"Keyword-based sentiment analysis for {symbol}",
-                        "document_count": 1
-                    }
-                    last_sentiment = sentiment_data[date_str]
-                    last_sentiment_date = trading_day
-                
+                    sentiment_result = await self.finbert_and_keyword_sentiment(symbol, date_str, i)
+                    sentiment_data[date_str] = sentiment_result
+                    last_sentiment = sentiment_result
+                    last_sentiment_date = trading_day                
             else:
                 # Either OpenAI API key is not avaliable so a full sentiment analysis cannot be conducted or a Non-API day: use hybrid fallback 
                 if last_sentiment is not None:
@@ -159,18 +249,49 @@ class TradingModel(BaseModel):
                 else:
                     decayed_score = 0.0
 
-                keyword_result = await self._get_keyword_sentiment(symbol, date_str, i)
-                keyword_score = keyword_result.get('score', 0.0)
+                # Get fallback analysis result
+                result = await self.finbert_and_keyword_sentiment(symbol, date_str, i)
+                fallback_score = result.get('score', 0.0)
+                fallback_confidence = result.get('confidence', 0.0)
+                fallback_enabled = result.get('enabled', False)
 
+                # Calculate combined score
                 combined_score = (self.sentiment_combo_weight * decayed_score + 
-                                (1 - self.sentiment_combo_weight) * keyword_score)
+                                (1 - self.sentiment_combo_weight) * fallback_score)
+
+                # Calculate combined confidence (weighted average)
+                # Decayed sentiment gets base confidence of 0.5, fallback gets its actual confidence
+                combined_confidence = (self.sentiment_combo_weight * 0.5 + 
+                                      (1 - self.sentiment_combo_weight) * fallback_confidence)
+
+                # Determine if the hybrid analysis should be enabled
+                # Only enable if we have meaningful data from either source
+                hybrid_enabled = (
+                    combined_confidence >= self.sentiment_confidence_threshold and
+                    (fallback_enabled or abs(decayed_score) > SENTIMENT_CLASSIFICATION_THRESHOLD)
+                )
+
+                # Determine sentiment with consistent threshold logic
+                if abs(combined_score) < SENTIMENT_CLASSIFICATION_THRESHOLD:
+                    sentiment = "neutral"
+                elif combined_score > SENTIMENT_CLASSIFICATION_THRESHOLD:
+                    sentiment = "bullish"
+                else:
+                    sentiment = "bearish"
 
                 fallback_sentiment = {
-                    "sentiment": "bullish" if combined_score > 0.1 else "bearish" if combined_score < -0.1 else "neutral",
+                    "sentiment": sentiment,
                     "score": combined_score,
-                    "confidence": 0.5,
-                    "enabled": True,
-                    "source": "hybrid_fallback"
+                    "confidence": combined_confidence,
+                    "enabled": hybrid_enabled,
+                    "source": "hybrid_fallback",
+                    "reasoning": f"Combined decayed sentiment ({decayed_score:.3f}) with fallback analysis ({fallback_score:.3f})",
+                    "components": {
+                        "decayed_score": decayed_score,
+                        "fallback_score": fallback_score,
+                        "fallback_enabled": fallback_enabled,
+                        "fallback_confidence": fallback_confidence
+                    }
                 }
                 sentiment_data[date_str] = fallback_sentiment
     
@@ -251,7 +372,7 @@ class TradingModel(BaseModel):
         speed_configs = {
             "lightning": {
                 "sentiment_weight": [0.0, 0.2, 0.4],
-                "sentiment_threshold": [0.1, 0.2]
+                "sentiment_threshold": [SENTIMENT_CLASSIFICATION_THRESHOLD, 0.2]
             },
             "fast": {
                 "sentiment_weight": [0.0, 0.1, 0.3, 0.5],
@@ -259,15 +380,15 @@ class TradingModel(BaseModel):
             },
             "medium": {
                 "sentiment_weight": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
-                "sentiment_threshold": [0.05, 0.1, 0.15, 0.2]
+                "sentiment_threshold": [0.05, SENTIMENT_CLASSIFICATION_THRESHOLD, 0.15, 0.2]
             },
             "balanced": {
                 "sentiment_weight": [0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
-                "sentiment_threshold": [0.05, 0.1, 0.15, 0.2, 0.25]
+                "sentiment_threshold": [0.05, SENTIMENT_CLASSIFICATION_THRESHOLD, 0.15, 0.2, 0.25]
             },
             "thorough": {
                 "sentiment_weight": [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
-                "sentiment_threshold": [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+                "sentiment_threshold": [0.05, SENTIMENT_CLASSIFICATION_THRESHOLD, 0.15, 0.2, 0.25, 0.3]
             },
             "exhaustive": {
                 "sentiment_weight": [i/20.0 for i in range(0, 11)],  # 0.0 to 0.5 in 0.025 steps
@@ -473,25 +594,15 @@ class TradingModel(BaseModel):
         
         return " | ".join(display_parts)
 
-    async def _get_keyword_sentiment(self, symbol: str, date: str = None, trading_day_index: int = None) -> Dict[str, Any]:
-        documents = await self._llama_engine.retrieve_documents(symbol, self.analysis_scope, date, days_back = 30, trading_day_index = trading_day_index, alpha_vantage_api_frequency = self.alpha_vantage_api_frequency)
-        enhanced_text = "\n\n".join([doc.text for doc in documents])
-        if not enhanced_text.strip():
-            logger.warning(f"No financial data retrieved for {symbol} on {date} - using generic placeholder for keyword sentiment analysis")
-            enhanced_text = f"Financial analysis for {symbol} on {date} - market sentiment and performance indicators"
-        keyword_result = self._llama_engine._get_keyword_sentiment(enhanced_text)
-
-        return keyword_result
-
-
     async def simulate(self, symbol: str) -> Dict[str, Any]:
         logger.info(f"Starting simulation for {symbol}")
         logger.info(f"Model parameters: use_sentiment={self.use_sentiment}, strategy={self.strategy}, analysis_scope={self.analysis_scope}")
         
-        # Initialize LlamaEngine if sentiment analysis is enabled
-        if self.use_sentiment and self._llama_engine is None:
-            logger.info("Initializing LlamaEngine for sentiment analysis")
+        if self.use_sentiment:
+            logger.info("Initializing sentiment analyzers")
             self._llama_engine = QuantFinLlamaEngine()
+            self._finbert_analyzer = FinBERTAnalyzer()
+            self._keyword_analyzer = KeywordAnalyzer()
 
         # Suppress yfinance progress bar
         data = yf.download(symbol, start=self.start_date, end=self.end_date, progress=False, auto_adjust=True)
@@ -533,10 +644,12 @@ class TradingModel(BaseModel):
         """Enhanced backtesting with split-sample optimization and sentiment comparison"""
         logger.info(f"Starting {('optimized' if self.enable_optimization else 'simple')} backtest for {symbol}")
         
-        # Initialize LlamaEngine if sentiment analysis is enabled
-        if self.use_sentiment and self._llama_engine is None:
-            logger.info("Initializing LlamaEngine for sentiment analysis")
+        if self.use_sentiment:
+            logger.info("Initializing sentiment analyzers")
             self._llama_engine = QuantFinLlamaEngine()
+            self._finbert_analyzer = FinBERTAnalyzer()
+            self._keyword_analyzer = KeywordAnalyzer()
+
 
         # This data download will only be used by the "if not self.enable_optimization:" branch below, it is not placed under that branch
         # because we need "trading_days = data.index", and "trading_days" will be used build sentiment_data, which will be used both by that branch, and also by the 

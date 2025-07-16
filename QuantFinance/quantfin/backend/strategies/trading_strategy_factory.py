@@ -1,7 +1,7 @@
 import backtrader as bt
-from typing import Dict, Any, Tuple, Type
+from typing import Dict, Any, Type, Tuple
 import logging
-from datetime import datetime, timedelta
+from quantfin.backend.config.config import SENTIMENT_CLASSIFICATION_THRESHOLD, SENTIMENT_WEIGHT_DEFAULT
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,8 @@ class BaseStrategy(bt.Strategy):
         ('bb_period', 20),
         ('bb_dev', 2.0),
         ('use_sentiment', False),
-        ('sentiment_weight', 0.3),
-        ('sentiment_threshold', 0.1),
+        ('sentiment_weight', SENTIMENT_WEIGHT_DEFAULT), 
+        ('sentiment_threshold', SENTIMENT_CLASSIFICATION_THRESHOLD),
         ('sentiment_data', None),
         ('symbol', None),
         ('trading_days', None),
@@ -57,7 +57,7 @@ class SMAStrategy(BaseStrategy):
             if self.params.use_sentiment and abs(sentiment_score) > self.params.sentiment_threshold:
                 combined_signal = (1 - self.params.sentiment_weight) * sma_signal + \
                                   self.params.sentiment_weight * sentiment_score
-                if combined_signal > 0.1:  # Buy threshold
+                if combined_signal > SENTIMENT_CLASSIFICATION_THRESHOLD: # Buy threshold
                     self.buy()
             else:
                 # Standard SMA logic

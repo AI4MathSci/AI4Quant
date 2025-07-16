@@ -8,7 +8,7 @@ import time
 logger = logging.getLogger(__name__)
 
 # Load .env file
-env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+env_path = os.path.join(os.getcwd(), '.env')
 logger.info(f"Loading .env file from: {env_path}")
 load_dotenv(env_path)
 
@@ -100,6 +100,30 @@ class Settings(BaseSettings):
 # Create a single instance of the settings
 config = Settings()
 full_sentiment_analysis = config.has_openai_key # Boolean to indciate whether using full sentiment analysis (OpenAI API is configured)
+
+# Sentiment Analysis Configuration
+SENTIMENT_CLASSIFICATION_THRESHOLD = float(os.getenv('SENTIMENT_CLASSIFICATION_THRESHOLD', '0.1'))
+SENTIMENT_CONFIDENCE_THRESHOLD = float(os.getenv('SENTIMENT_CONFIDENCE_THRESHOLD', '0.5'))
+SENTIMENT_DECAY_FACTOR = float(os.getenv('SENTIMENT_DECAY_FACTOR', '0.9'))
+SENTIMENT_COMBO_WEIGHT = float(os.getenv('SENTIMENT_COMBO_WEIGHT', '0.5'))
+SENTIMENT_WEIGHT_DEFAULT = float(os.getenv('SENTIMENT_WEIGHT_DEFAULT', '0.3'))
+
+# Validation function
+def validate_sentiment_config():
+    """Validate sentiment configuration values"""
+    if not (0.0 <= SENTIMENT_CLASSIFICATION_THRESHOLD <= 1.0):
+        raise ValueError(f"SENTIMENT_CLASSIFICATION_THRESHOLD must be between 0.0 and 1.0, got {SENTIMENT_CLASSIFICATION_THRESHOLD}")
+    if not (0.0 <= SENTIMENT_CONFIDENCE_THRESHOLD <= 1.0):
+        raise ValueError(f"SENTIMENT_CONFIDENCE_THRESHOLD must be between 0.0 and 1.0, got {SENTIMENT_CONFIDENCE_THRESHOLD}")
+    if not (0.0 <= SENTIMENT_DECAY_FACTOR <= 1.0):
+        raise ValueError(f"SENTIMENT_DECAY_FACTOR must be between 0.0 and 1.0, got {SENTIMENT_DECAY_FACTOR}")
+    if not (0.0 <= SENTIMENT_COMBO_WEIGHT <= 1.0):
+        raise ValueError(f"SENTIMENT_COMBO_WEIGHT must be between 0.0 and 1.0, got {SENTIMENT_COMBO_WEIGHT}")
+    if not (0.0 <= SENTIMENT_WEIGHT_DEFAULT <= 1.0):
+        raise ValueError(f"SENTIMENT_WEIGHT_DEFAULT must be between 0.0 and 1.0, got {SENTIMENT_WEIGHT_DEFAULT}")
+
+# Validate on import
+validate_sentiment_config()
 
 # Log the loaded credentials (without exposing sensitive values)
 logger.info("Credentials loaded:")
