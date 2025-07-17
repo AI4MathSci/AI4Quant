@@ -23,7 +23,7 @@ class QuantFinLlamaEngine:
     
     def __init__(self):
         if full_sentiment_analysis:
-            logger.info("LlamaIndex will use full sentiment analysis capabilities- OpenAI API key configured.")
+            logger.info("LlamaIndex will use full sentiment analysis capabilities - OpenAI API key configured.")
             # Configure LlamaIndex settings
             Settings.llm = OpenAI(
                 api_key=config.OPENAI_API_KEY,
@@ -36,7 +36,7 @@ class QuantFinLlamaEngine:
             )
             Settings.node_parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
         else:
-            logger.info("LlamaIndex cannnot use full sentiment analysis, will use keyword-based sentiment analysis only - OpenAI API key not configured.")
+            logger.info("LlamaIndex cannot use full sentiment analysis, will use a combo of FinBERT and keyword-based sentiment analysis - OpenAI API key not configured.")
         
         self.index = None
         self.query_engine = None
@@ -127,7 +127,7 @@ class QuantFinLlamaEngine:
             - Do NOT use any modifiers or qualifiers such as "somewhat", "very", "slightly", "strong", etc. in the sentiment label.
             - If you wish to indicate the strength of the sentiment, use the "score" field, do not modify the sentiment label itself. 
             - Provide a sentiment score between -1.0 and 1.0, with -1.0 being the most bearish sentiment, 0.0 as neutral, and 1.0 as the most bullish sentiment.
-            - Provie a confidence score between 0 and 1 indicating how confident you are in this classification.
+            - Provide a confidence score between 0 and 1 indicating how confident you are in this classification.
 
             Return the result strictly in this JSON format:
             {{
